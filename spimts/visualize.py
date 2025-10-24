@@ -5,12 +5,12 @@ Visualization-only pipeline:
 - No Calculator() calls; safe to iterate on plots
 """
 import os, argparse, numpy as np
-from pyspi.helpers.utils import ensure_dir, save_fig, list_model_runs, load_numpy_or_none
-from pyspi.helpers.plotting import (
+from spimts.helpers.utils import ensure_dir, save_fig, list_model_runs, load_numpy_or_none
+from spimts.helpers.plotting import (
     plot_mts_heatmap, plot_mpi_heatmap, plot_spi_space,
     plot_spi_fingerprint, plot_spi_dendrogram
 )
-from pyspi.helpers.selection import select_core_spis
+from spimts.helpers.selection import select_core_spis
 
 def _load_artifacts(model_dir: str):
     arrays = os.path.join(model_dir, "arrays")

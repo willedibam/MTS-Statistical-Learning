@@ -11,7 +11,7 @@ import yaml
 from pyspi.calculator import Calculator
 
 # your generators module (copy your current generators.py here)
-from pyspi.generators import (
+from spimts.generators import (
     gen_var, gen_ou_network, gen_kuramoto, gen_stuart_landau,
     gen_lorenz96, gen_rossler_coupled, gen_cml_logistic,
     gen_ou_heavytail, gen_gbm_returns, gen_timewarp_clones
@@ -49,14 +49,8 @@ PROFILES = {
 def _get_config_path(config_hint: str | None = None) -> str:
     if config_hint and os.path.exists(config_hint):
         return config_hint
-    try:
-        import pyspi as _pyspi
-        cand = os.path.join(os.path.dirname(_pyspi.__file__), "pilot0_config.yaml")
-        if os.path.exists(cand):
-            return cand
-    except Exception:
-        pass
-    cand = os.path.abspath("./pyspi/configs/pilot0_config.yaml")
+    here = os.path.dirname(__file__)
+    cand = os.path.abspath(os.path.join(here, "configs", "pilot0_config.yaml"))
     if os.path.exists(cand):
         return cand
     raise FileNotFoundError("Could not locate pilot0_config.yaml")
