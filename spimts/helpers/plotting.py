@@ -1,6 +1,8 @@
 # pyspi/helpers/plotting.py
 from typing import Dict, List
+import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import pearsonr, spearmanr, kendalltau
@@ -29,7 +31,7 @@ def plot_mpi_heatmap(matrix: np.ndarray, spi: str, cbar: bool = False, ax=None):
         fig, ax = plt.subplots(figsize=(6, 5), dpi=150)
         created = True
     # basic bounds: MI >= 0, others often [-1,1]
-    lower_zero = spi.lower().startswith("mi_") or spi.lower().startswith("tlmi_")
+    lower_zero = spi.lower().startswith("mi_") or spi.lower().startswith("tlmi_") or spi.lower().startswith("te_")
     vmin = 0.0 if lower_zero else -1.0
     vmax = None if lower_zero else 1.0
     center = None if lower_zero else 0.0
@@ -91,24 +93,128 @@ def plot_spi_space(matrices: Dict[str, np.ndarray], spi_names: List[str], method
                 ax.set_visible(False)
     plt.tight_layout()
 
+def plot_spi_space_individual(matrices: Dict[str, np.ndarray], spi_names: List[str], 
+                               output_dir: str, method: str = "spearman"):
+    """Plot individual scatter plots for all pairwise SPI comparisons.
+    
+    Creates n(n-1)/2 individual figures, one per SPI pair, saved to output_dir.
+    This is useful for large datasets where the full SPI-space grid is too large to view.
+    
+    Args:
+        matrices: Dict of SPI name -> MPI matrix (2D array)
+        spi_names: List of SPI names to include
+        output_dir: Directory path where individual plots will be saved
+        method: Correlation method ('spearman', 'pearson', or 'kendall')
+    
+    Returns:
+        int: Number of plots created
+    """
+    # vectorise off-diagonals
+    off = {k: _offdiag(matrices[k]) for k in spi_names if k in matrices}
+    names = list(off.keys())
+    n = len(names)
+    
+    if n < 2:
+        print("[WARN] Need ≥2 SPIs for individual SPI-space plots; skipping.")
+        return 0
+    
+    # Map method to Greek symbol
+    corr_symbols = {"spearman": r"$\rho$", "pearson": r"$r$", "kendall": r"$\tau$"}
+    symbol = corr_symbols.get(method, method)
+    
+    plot_count = 0
+    for i in range(n):
+        for j in range(i+1, n):
+            a, b = names[i], names[j]
+            x, y = off[a], off[b]
+            
+            # Check if data is valid
+            ok = (np.all(np.isfinite(x)) and np.all(np.isfinite(y))
+                  and np.std(x) > 0 and np.std(y) > 0)
+            r = _score_pair(x, y, method) if ok else np.nan
+            
+            # Create individual SQUARE figure
+            fig, ax = plt.subplots(figsize=(6, 6), dpi=150)
+            ax.scatter(x, y, alpha=0.5, s=10, marker='o')
+            
+            # Add regression line if possible
+            if ok:
+                try:
+                    z = np.polyfit(x, y, 1)
+                    ax.plot(x, np.poly1d(z)(x), "r--", alpha=0.7, linewidth=2)
+                except Exception:
+                    pass
+            
+            ax.set_xlabel(a, fontsize=12)
+            ax.set_ylabel(b, fontsize=12)
+            # Title shows only correlation value with appropriate symbol
+            ax.set_title(f"{symbol} = {r:.3f}" if np.isfinite(r) else f"{symbol} = nan", fontsize=13)
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            
+            # Save figure
+            safe_a = a.replace("/", "-").replace("\\", "-").replace(" ", "_")
+            safe_b = b.replace("/", "-").replace("\\", "-").replace(" ", "_")
+            filename = f"{safe_a}_vs_{safe_b}.png"
+            filepath = os.path.join(output_dir, filename)
+            
+            try:
+                save_fig(filepath, fig=fig)
+                plot_count += 1
+            except Exception as e:
+                print(f"[WARN] Failed to save {filename}: {e}")
+            finally:
+                plt.close(fig)
+    
+    print(f"[INFO] Created {plot_count} individual SPI-space plots in {output_dir}")
+    return plot_count
+
 # ---------- Fingerprint barcode ----------
-def fingerprint_matrix(offdiag_map: Dict[str, np.ndarray], method: str = "spearman") -> np.ndarray:
-    keys = list(offdiag_map.keys())
-    K = len(keys)
-    F = np.zeros((K, K), float)
+def fingerprint_matrix(offdiag: Dict[str, np.ndarray], method: str = "spearman") -> pd.DataFrame:
+    """Compute pairwise correlation matrix between SPIs."""
+    spis = list(offdiag.keys())
+    K = len(spis)
+    Mx = np.eye(K)
+    
     for i in range(K):
-        xi = _offdiag(offdiag_map[keys[i]])
-        for j in range(K):
-            yj = _offdiag(offdiag_map[keys[j]])
-            ok = (np.all(np.isfinite(xi)) and np.all(np.isfinite(yj))
-                  and np.std(xi) > 0 and np.std(yj) > 0)
-            if not ok:
-                F[i, j] = np.nan
+        for j in range(i+1, K):
+            x, y = offdiag[spis[i]], offdiag[spis[j]]
+            
+            # Check for constant or invalid arrays
+            if np.std(x) == 0 or np.std(y) == 0:
+                val = 0.0  # Correlation undefined for constant arrays
+            elif not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+                val = 0.0  # Handle NaN/Inf
             else:
-                F[i, j] = _score_pair(xi, yj, method)
-    return F, keys
+                try:
+                    if method == "pearson":
+                        val = pearsonr(x, y)[0]
+                    elif method == "spearman":
+                        val = spearmanr(x, y)[0]
+                    elif method == "kendall":
+                        val = kendalltau(x, y)[0]
+                    else:
+                        raise ValueError("Unknown method")
+                    
+                    # Sanitize result
+                    if not np.isfinite(val):
+                        val = 0.0
+                except Exception:
+                    val = 0.0
+            
+            Mx[i, j] = Mx[j, i] = val
+    
+    return pd.DataFrame(Mx, index=spis, columns=spis)
+
 
 def plot_spi_fingerprint(offdiag_map: Dict[str, np.ndarray], spi_names: List[str], method: str = "spearman"):
+    """Plot fingerprint barcode showing pairwise SPI correlations.
+    
+    Args:
+        offdiag_map: Dict of SPI name -> already-vectorized off-diagonal values (1D arrays)
+        spi_names: List of SPI names to include (order respected)
+        method: Correlation method ('spearman', 'pearson', or 'kendall')
+    """
     # restrict to provided names (order respected)
     off = {k: offdiag_map[k] for k in spi_names if k in offdiag_map}
     names = list(off.keys())
@@ -120,7 +226,8 @@ def plot_spi_fingerprint(offdiag_map: Dict[str, np.ndarray], spi_names: List[str
     for i in range(len(names)):
         for j in range(i+1, len(names)):
             a, b = names[i], names[j]
-            xa, xb = _offdiag(off[a]), _offdiag(off[b])
+            # offdiag_map already contains vectorized data, no need to call _offdiag()
+            xa, xb = off[a], off[b]
             ok = (np.all(np.isfinite(xa)) and np.all(np.isfinite(xb))
                   and np.std(xa) > 0 and np.std(xb) > 0)
             if ok:
@@ -130,7 +237,7 @@ def plot_spi_fingerprint(offdiag_map: Dict[str, np.ndarray], spi_names: List[str
             vals.append(r); labels.append(f"{a} | {b}")
     arr = np.array(vals)[None, :]
     if method == "spearman" or method == "pearson" or method == "kendall":
-        vmin, vmax, center, cmap = -1, 1, 0, "coolwarm"
+        vmin, vmax, center, cmap = -1, 1, 0, "icefire" #prev: 'coolwarm'
     else:
         vmin, vmax, center, cmap = None, None, None, "viridis"
     plt.figure(figsize=(max(6, 0.25*arr.shape[1]), 1.6), dpi=180)
@@ -140,15 +247,38 @@ def plot_spi_fingerprint(offdiag_map: Dict[str, np.ndarray], spi_names: List[str
     plt.tight_layout()
 
 # ---------- Dendrogram over SPIs ----------
-def plot_spi_dendrogram(offdiag_map: Dict[str, np.ndarray], method: str = "spearman", link: str = "average"):
-    F, keys = fingerprint_matrix(offdiag_map, method=method)
-    # convert similarity to distance; guard NaNs
-    sim = np.nan_to_num(F, nan=0.0)
-    dist = 1 - sim
-    # condensed form: take upper triangle
-    iu = np.triu_indices_from(dist, k=1)
-    dvec = dist[iu]
+def plot_spi_dendrogram(offdiag: dict[str, np.ndarray], method: str = "spearman", 
+                        link: str = "average", ax=None):
+    """Plot hierarchical clustering dendrogram of SPIs."""
+    if len(offdiag) < 2:
+        print("[WARN] Need at least 2 SPIs for dendrogram, skipping.")
+        return None
+    
+    F = fingerprint_matrix(offdiag, method=method)
+    
+    # Convert to distance and sanitize
+    D = 1.0 - F.values
+    D = np.clip(D, 0, 2)  # Clip to [0, 2] range
+    D = np.nan_to_num(D, nan=1.0, posinf=2.0, neginf=0.0)  # Replace invalid values
+    np.fill_diagonal(D, 0.0)
+    
+    # Check if distance matrix is valid
+    iu = np.triu_indices_from(D, k=1)
+    dvec = D[iu]
+    if not np.all(np.isfinite(dvec)):
+        print("[WARN] Distance matrix contains non-finite values after sanitization, skipping dendrogram.")
+        return None
+    
+    if np.all(dvec == 0):
+        print("[WARN] All distances are zero, skipping dendrogram.")
+        return None
+    
     Z = linkage(dvec, method=link)
-    plt.title(f"SPI dendrogram ({method}, link={link})")
-    dendrogram(Z, labels=keys, leaf_rotation=90)
-    plt.tight_layout()
+    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
+    
+    dendrogram(Z, labels=F.index.to_list(), leaf_rotation=90, ax=ax)
+    ax.set_title(f"SPI Dendrogram ({method}, {link})")
+    return ax
+

@@ -1,0 +1,35 @@
+.statistics.basic:
+  SpearmanR:
+    labels:
+      - undirected
+      - nonlinear
+      - signed
+      - bivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - squared: false
+
+  Covariance:
+    labels:
+      - undirected
+      - linear
+      - signed
+      - multivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - estimator: EmpiricalCovariance
+
+.statistics.infotheory:
+  MutualInfo:
+    labels:
+      - undirected
+      - nonlinear
+      - unsigned
+      - bivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - estimator: kraskov
+        NN: 4

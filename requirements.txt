@@ -30,3 +30,8 @@ fastparquet==2024.5.0
 
 # --- the main library ---
 pyspi>=1.1.0
+
+# --- bullshit ---
+oct2py
+ipython
+psutil

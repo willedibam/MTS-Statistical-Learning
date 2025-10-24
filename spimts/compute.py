@@ -1,6 +1,8 @@
 # pyspi/compute.py
 from __future__ import annotations
-import os, argparse, json, time, hashlib
+import os
+os.environ["TSLEARN_BACKEND"] = "numpy"  # <-- exact
+import argparse, json, time, hashlib, psutil
 from dataclasses import dataclass
 from typing import Dict, Callable, List
 
@@ -31,6 +33,30 @@ PROFILES = {
         "GBM-returns": dict(M=4, T=1500),
         "TimeWarp-clones": dict(M=4, T=1500),
     },
+    "dev+": {
+        "VAR(1)": dict(M=10, T=2000),
+        "OU-network": dict(M=10, T=2000),
+        "Kuramoto": dict(M=10, T=5000),
+        "Stuart-Landau": dict(M=10, T=5000),
+        "Lorenz-96": dict(M=10, T=5000),
+        "Rössler-coupled": dict(M=10, T=4000),
+        "CML-logistic": dict(M=20, T=1000),
+        "OU-heavyTail": dict(M=10, T=2000),
+        "GBM-returns": dict(M=10, T=3000),
+        "TimeWarp-clones": dict(M=10, T=3000),
+    },
+    "dev++": {
+        "VAR(1)": dict(M=15, T=3000),
+        "OU-network": dict(M=15, T=3000),
+        "Kuramoto": dict(M=15, T=7500),
+        "Stuart-Landau": dict(M=15, T=7500),
+        "Lorenz-96": dict(M=15, T=12000),
+        "Rössler-coupled": dict(M=10, T=12000),
+        "OU-heavyTail": dict(M=15, T=3000),
+        "GBM-returns": dict(M=15, T=4000),
+        "TimeWarp-clones": dict(M=15, T=3000),
+        "CML-logistic": dict(M=25, T=5000),
+    },
     "paper": {
         "VAR(1)": dict(M=20, T=4000),
         "OU-network": dict(M=20, T=4000),
@@ -38,10 +64,10 @@ PROFILES = {
         "Stuart-Landau": dict(M=20, T=10000),
         "Lorenz-96": dict(M=20, T=20000),
         "Rössler-coupled": dict(M=12, T=20000),
-        "CML-logistic": dict(M=20, T=8000),
         "OU-heavyTail": dict(M=20, T=4000),
         "GBM-returns": dict(M=20, T=5000),
         "TimeWarp-clones": dict(M=20, T=4000),
+        "CML-logistic": dict(M=30, T=8000),
     }
 }
 
@@ -229,16 +255,163 @@ def _save_calc_table(calc: Calculator, path_csv: str, path_parquet: str | None =
         except Exception as e:
             print(f"[WARN] parquet save failed ({e}); CSV saved instead.")
 
+# ----------------------- performance tracking ---------------------------
+def _format_time(seconds: float) -> str:
+    """Format seconds into human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{mins}m {secs}s"
+    else:
+        hrs = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        return f"{hrs}h {mins}m"
+
+def _get_memory_usage() -> dict:
+    """Get current memory usage statistics."""
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    virtual_mem = psutil.virtual_memory()
+    return {
+        "process_mb": mem_info.rss / 1024 / 1024,
+        "available_mb": virtual_mem.available / 1024 / 1024,
+        "percent_used": virtual_mem.percent
+    }
+
+def _check_memory_warning(required_mb: float) -> str | None:
+    """Check if memory might be insufficient and return warning if needed."""
+    mem = _get_memory_usage()
+    if mem["available_mb"] < required_mb * 1.5:  # 1.5x safety margin
+        return f"⚠️  Low memory: {mem['available_mb']:.0f}MB available, ~{required_mb:.0f}MB needed"
+    return None
+
+def _estimate_memory_required(M: int, T: int, n_spis: int = 50) -> float:
+    """Rough estimate of memory needed in MB."""
+    # Timeseries: T*M*8 bytes, Matrices: n_spis*M*M*8 bytes, overhead ~2x
+    timeseries_mb = (T * M * 8) / 1024 / 1024
+    matrices_mb = (n_spis * M * M * 8) / 1024 / 1024
+    calc_overhead_mb = timeseries_mb * 3  # pyspi internal overhead
+    return (timeseries_mb + matrices_mb + calc_overhead_mb) * 2  # 2x safety
+
+def _save_performance_metrics(perf_data: List[dict], outdir: str):
+    """Save performance metrics to CSV in performance/ folder."""
+    perf_dir = os.path.join(outdir, "performance")
+    os.makedirs(perf_dir, exist_ok=True)
+    
+    df = pd.DataFrame(perf_data)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    csv_path = os.path.join(perf_dir, f"perf_metrics_{timestamp}.csv")
+    df.to_csv(csv_path, index=False)
+    
+    # Create a simple summary plot if matplotlib available
+    try:
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        
+        # Runtime vs M*T
+        ax = axes[0, 0]
+        df['M*T'] = df['M'] * df['T']
+        ax.scatter(df['M*T'], df['runtime_seconds'], alpha=0.6, s=100)
+        for i, row in df.iterrows():
+            ax.text(row['M*T'], row['runtime_seconds'], row['model'], fontsize=8, alpha=0.7)
+        ax.set_xlabel('M × T (data size)')
+        ax.set_ylabel('Runtime (seconds)')
+        ax.set_title('Runtime vs Data Size')
+        ax.grid(True, alpha=0.3)
+        
+        # Memory usage
+        ax = axes[0, 1]
+        df['edges'] = df['M'] * (df['M'] - 1)
+        ax.scatter(df['edges'], df['peak_memory_mb'], alpha=0.6, s=100, c='orange')
+        for i, row in df.iterrows():
+            ax.text(row['edges'], row['peak_memory_mb'], row['model'], fontsize=8, alpha=0.7)
+        ax.set_xlabel('Number of Edges (M×(M-1))')
+        ax.set_ylabel('Peak Memory (MB)')
+        ax.set_title('Memory Usage vs Network Size')
+        ax.grid(True, alpha=0.3)
+        
+        # SPIs computed
+        ax = axes[1, 0]
+        ax.bar(range(len(df)), df['n_spis'], alpha=0.6)
+        ax.set_xticks(range(len(df)))
+        ax.set_xticklabels(df['model'], rotation=45, ha='right')
+        ax.set_ylabel('Number of SPIs')
+        ax.set_title('SPIs Computed per Model')
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        # Runtime distribution
+        ax = axes[1, 1]
+        sorted_df = df.sort_values('runtime_seconds')
+        ax.barh(range(len(sorted_df)), sorted_df['runtime_seconds'], alpha=0.6)
+        ax.set_yticks(range(len(sorted_df)))
+        ax.set_yticklabels(sorted_df['model'])
+        ax.set_xlabel('Runtime (seconds)')
+        ax.set_title('Runtime by Model')
+        ax.grid(True, alpha=0.3, axis='x')
+        
+        plt.tight_layout()
+        plot_path = os.path.join(perf_dir, f"perf_plots_{timestamp}.png")
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"[PERF] Metrics saved → {perf_dir}/")
+    except Exception as e:
+        print(f"[WARN] Performance plot generation failed: {e}")
+
+def _model_already_computed(base_dir: str, model_name: str, M: int, T: int) -> tuple[bool, str | None]:
+    """Check if this model (regardless of run_id) has already been computed.
+    
+    Returns:
+        (exists, folder_path) - True and path if found, False and None otherwise
+    """
+    if not os.path.isdir(base_dir):
+        return False, None
+    
+    # Look for any folder ending with this model name
+    model_safe = model_name.replace(' ', '_')
+    for folder in os.listdir(base_dir):
+        if not folder.endswith(f"_{model_safe}"):
+            continue
+        
+        folder_path = os.path.join(base_dir, folder)
+        if not os.path.isdir(folder_path):
+            continue
+        
+        # Check meta.json for M and T match
+        meta_file = os.path.join(folder_path, "meta.json")
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file) as f:
+                    meta = json.load(f)
+                if meta.get('M') == M and meta.get('T') == T:
+                    # Verify it has required files
+                    arrays_dir = os.path.join(folder_path, "arrays")
+                    timeseries = os.path.join(arrays_dir, "timeseries.npy")
+                    if os.path.exists(timeseries) and os.path.isdir(arrays_dir):
+                        mpi_files = [f for f in os.listdir(arrays_dir) if f.startswith("mpi_")]
+                        if len(mpi_files) > 0:
+                            return True, folder_path
+            except Exception:
+                continue
+    
+    return False, None
+
 # ---------------------------- main --------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="Compute artifacts with pyspi (no plotting).")
-    ap.add_argument("--mode", choices=["dev", "paper"], default="dev", help="Profile of M,T per model.")
+    ap.add_argument("--mode", choices=["dev", "dev+", "dev++", "paper"], default="dev", 
+                    help="Profile of M,T per model.")
     ap.add_argument("--config", default=None, help="Path to pilot0_config.yaml (auto-detected if not provided).")
     ap.add_argument("--subset", default="pilot0", help="pyspi subset name.")
     ap.add_argument("--outdir", default="./results", help="Output directory root.")
     ap.add_argument("--cache", default="./cache", help="Cache directory for calc.table parquet/CSV.")
     ap.add_argument("--models", type=str, default="", help="Comma-separated model names to run (leave empty for all).")
     ap.add_argument("--normalise", type=int, default=1, help="1/0: z-score normalise input to Calculator.")
+    ap.add_argument("--skip-existing", action="store_true", 
+                    help="Skip models that already have computed results.")
+    ap.add_argument("--dry-run", action="store_true", 
+                    help="Show what would be computed without actually running.")
     args = ap.parse_args()
 
     profile = PROFILES[args.mode]
@@ -254,68 +427,164 @@ def main():
 
     base = os.path.join(args.outdir, args.mode)
     os.makedirs(base, exist_ok=True)
+    
+    # Dry-run mode: preview what will be computed
+    if args.dry_run:
+        print(f"\n{'='*70}")
+        print(f"DRY RUN - Would compute {len(generators)} model(s) in '{args.mode}' mode")
+        print(f"{'='*70}\n")
+        print(f"Config: {os.path.basename(configfile)} (hash: {confighash})")
+        print(f"Output: {base}\n")
+        
+        total_edges = 0
+        total_datapoints = 0
+        for model, gen in generators.items():
+            params = profile[model]
+            M, T = params['M'], params['T']
+            edges = M * (M - 1)
+            datapoints = M * T
+            est_mem = _estimate_memory_required(M, T)
+            
+            total_edges += edges
+            total_datapoints += datapoints
+            
+            print(f"  • {model:20s} M={M:2d}, T={T:5d}  →  {edges:4d} edges, {datapoints:7d} datapoints, ~{est_mem:.0f}MB")
+        
+        print(f"\n{'='*70}")
+        print(f"Total: {total_edges:,} edges, {total_datapoints:,} datapoints")
+        print(f"{'='*70}\n")
+        return
 
-    for model, gen in generators.items():
-        print(f"[RUN] {model}...", end=" ", flush=True)
-        data = gen()  # (T, M)
-        T, M = data.shape
+    # Track performance metrics
+    perf_data = []
+    total_models = len(generators)
+    total_start_time = time.time()
+    
+    print(f"\n{'='*70}")
+    print(f"COMPUTE MODE: {args.mode} | Models: {total_models} | Subset: {args.subset}")
+    print(f"{'='*70}\n")
 
+    for idx, (model, gen) in enumerate(generators.items(), 1):
+        model_start = time.time()
+        params = profile[model]
+        T, M = params['T'], params['M']
+        
+        # Check if should skip (before generating new run_id)
+        if args.skip_existing:
+            exists, existing_path = _model_already_computed(base, model, M, T)
+            if exists:
+                print(f"[{idx}/{total_models}] {model:20s} ⏭️  SKIPPED (exists: {os.path.basename(existing_path)})")
+                continue
+        
+        # Generate run_id for new computation
         run_id = _make_run_id(model.replace(" ", "_"), M, T, args.subset, confighash)
         model_dir = os.path.join(base, f"{run_id}_{model.replace(' ', '_')}")
-        arrays_dir = os.path.join(model_dir, "arrays")
-        csv_dir = os.path.join(model_dir, "csv")
-        os.makedirs(arrays_dir, exist_ok=True)
-        os.makedirs(csv_dir, exist_ok=True)
+        
+        # Memory check
+        est_mem = _estimate_memory_required(M, T)
+        mem_warn = _check_memory_warning(est_mem)
+        
+        # Progress header
+        print(f"[{idx}/{total_models}] {model:20s} M={M:2d} T={T:5d} ", end="", flush=True)
+        if mem_warn:
+            print(f"\n        {mem_warn}")
+        
+        mem_before = _get_memory_usage()
+        
+        try:
+            # Generate data
+            data = gen()  # (T, M)
+            
+            # Setup directories
+            arrays_dir = os.path.join(model_dir, "arrays")
+            csv_dir = os.path.join(model_dir, "csv")
+            os.makedirs(arrays_dir, exist_ok=True)
+            os.makedirs(csv_dir, exist_ok=True)
 
-        # 1) Compute SPIs
-        calc = run_pyspi_on(data, configfile=configfile, subset=args.subset, normalise=bool(args.normalise))
+            # 1) Compute SPIs
+            calc = run_pyspi_on(data, configfile=configfile, subset=args.subset, normalise=bool(args.normalise))
 
-        # 2) Save calc.table (cache + per-run)
-        cache_csv = os.path.join(args.cache, f"{run_id}_{model}_calc_table.csv")
-        cache_parq = os.path.join(args.cache, f"{run_id}_{model}_calc_table.parquet")
-        _save_calc_table(calc, cache_csv, cache_parq)
-        _save_calc_table(calc, os.path.join(csv_dir, "calc_table.csv"), os.path.join(csv_dir, "calc_table.parquet"))
+            # 2) Save calc.table (cache + per-run)
+            cache_csv = os.path.join(args.cache, f"{run_id}_{model}_calc_table.csv")
+            cache_parq = os.path.join(args.cache, f"{run_id}_{model}_calc_table.parquet")
+            _save_calc_table(calc, cache_csv, cache_parq)
+            _save_calc_table(calc, os.path.join(csv_dir, "calc_table.csv"), os.path.join(csv_dir, "calc_table.parquet"))
 
-        # 3) Derive + save matrices/off-diagonals
-        spi_names = extract_spis(calc)
-        matrices, offdiag = {}, {}
-        for s in spi_names:
-            try:
-                sym = not _is_directed(s, labels_map)
-                mat = reconstruct_mpi(calc, s, M=M, symmetrize=sym)
-                matrices[s] = mat
-                offdiag[s] = _offdiag(mat)
-            except Exception as e:
-                print(f"\n[WARN] {model}: reconstruct failed for {s}: {e}")
+            # 3) Derive + save matrices/off-diagonals
+            spi_names = extract_spis(calc)
+            matrices, offdiag = {}, {}
+            for s in spi_names:
+                try:
+                    sym = not _is_directed(s, labels_map)
+                    mat = reconstruct_mpi(calc, s, M=M, symmetrize=sym)
+                    matrices[s] = mat
+                    offdiag[s] = _offdiag(mat)
+                except Exception as e:
+                    print(f"\n        [WARN] reconstruct failed for {s}: {e}")
 
-        # save arrays (timeseries + all MPIs/offdiags)
-        np.save(os.path.join(arrays_dir, "timeseries.npy"), data)
-        for spi, mat in matrices.items():
-            np.save(os.path.join(arrays_dir, f"mpi_{spi}.npy"), mat)
-        for spi, vec in offdiag.items():
-            np.save(os.path.join(arrays_dir, f"offdiag_{spi}.npy"), vec)
+            # save arrays (timeseries + all MPIs/offdiags)
+            np.save(os.path.join(arrays_dir, "timeseries.npy"), data)
+            for spi, mat in matrices.items():
+                np.save(os.path.join(arrays_dir, f"mpi_{spi}.npy"), mat)
+            for spi, vec in offdiag.items():
+                np.save(os.path.join(arrays_dir, f"offdiag_{spi}.npy"), vec)
 
-        # consolidated off-diagonal table (wide): one row per (i,j), columns per SPI
-        offdiag_csv = os.path.join(csv_dir, "offdiag_table.csv")
-        offdiag_parq = os.path.join(csv_dir, "offdiag_table.parquet")
-        _save_offdiag_table(matrices, offdiag_csv, offdiag_parq)
+            # consolidated off-diagonal table (wide): one row per (i,j), columns per SPI
+            offdiag_csv = os.path.join(csv_dir, "offdiag_table.csv")
+            offdiag_parq = os.path.join(csv_dir, "offdiag_table.parquet")
+            _save_offdiag_table(matrices, offdiag_csv, offdiag_parq)
 
+            # 4) Write simple meta manifest
+            meta = {
+                "model": model,
+                "run_id": run_id,
+                "M": M, "T": T,
+                "subset": args.subset,
+                "configfile": os.path.abspath(configfile),
+                "confighash": confighash,
+                "normalise": bool(args.normalise),
+                "n_spis": len(spi_names),
+            }
+            with open(os.path.join(model_dir, "meta.json"), "w") as f:
+                json.dump(meta, f, indent=2)
 
-        # 4) Write simple meta manifest
-        meta = {
-            "model": model,
-            "run_id": run_id,
-            "M": M, "T": T,
-            "subset": args.subset,
-            "configfile": os.path.abspath(configfile),
-            "confighash": confighash,
-            "normalise": bool(args.normalise),
-            "n_spis": len(spi_names),
-        }
-        with open(os.path.join(model_dir, "meta.json"), "w") as f:
-            json.dump(meta, f, indent=2)
-
-        print(f"✓ data=({T},{M}) SPIs={len(spi_names)} -> {model_dir}")
+            # Track performance
+            model_elapsed = time.time() - model_start
+            mem_after = _get_memory_usage()
+            peak_mem = max(mem_before['process_mb'], mem_after['process_mb'])
+            
+            perf_data.append({
+                'model': model,
+                'M': M,
+                'T': T,
+                'n_spis': len(spi_names),
+                'runtime_seconds': model_elapsed,
+                'peak_memory_mb': peak_mem,
+                'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+            
+            # Calculate ETA
+            elapsed_total = time.time() - total_start_time
+            avg_time_per_model = elapsed_total / idx
+            remaining_models = total_models - idx
+            eta_seconds = avg_time_per_model * remaining_models
+            
+            # Success output with timing
+            print(f"✓ {len(spi_names):2d} SPIs | {_format_time(model_elapsed)} | ETA: {_format_time(eta_seconds)}")
+            
+        except Exception as e:
+            print(f"✗ FAILED: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Save performance metrics
+    if perf_data:
+        _save_performance_metrics(perf_data, args.outdir)
+        
+        total_elapsed = time.time() - total_start_time
+        print(f"\n{'='*70}")
+        print(f"COMPLETED: {len(perf_data)}/{total_models} models in {_format_time(total_elapsed)}")
+        print(f"{'='*70}\n")
 
 if __name__ == "__main__":
     main()

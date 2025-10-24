@@ -1,0 +1,11 @@
+# run before bed
+python -m spimts compute --mode dev++ > dev++_overnight.log 2>&1
+
+# check progress when awake
+Get-Content dev++_overnight.log -Tail 30
+
+#if laptop might sleep when lid closes, run this first:
+powercfg /change standby-timeout-ac 0
+powercfg /change standby-timeout-dc 0
+
+# visualise results in monitoringpython -m spimts visualize --profile dev++
