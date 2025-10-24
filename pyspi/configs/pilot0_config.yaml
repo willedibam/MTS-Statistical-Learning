@@ -1,0 +1,178 @@
+.statistics.basic:
+  SpearmanR:
+    labels:
+      - undirected
+      - nonlinear
+      - signed
+      - bivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - squared: false
+
+  Covariance:
+    labels:
+      - undirected
+      - linear
+      - signed
+      - multivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - estimator: EmpiricalCovariance
+
+  CrossCorrelation:
+    labels:
+      - undirected
+      - linear
+      - signed/unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+    configs:
+      - statistic: mean
+      - statistic: max
+
+  KendallTau:
+    labels:
+      - undirected
+      - nonlinear
+      - signed
+      - bivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - squared: false
+
+.statistics.distance:
+  PairwiseDistance:
+    labels:
+      - unsigned
+      - unordered
+      - nonlinear
+      - undirected
+    dependencies:
+    configs:
+      - metric: euclidean
+      - metric: cosine
+
+  DynamicTimeWarping:
+    labels:
+      - undirected
+      - nonlinear
+      - unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+    configs:
+      - global_constraint: null
+      - global_constraint: sakoe_chiba
+      - global_constraint: itakura
+
+  DistanceCorrelation:
+    labels:
+      - undirected
+      - nonlinear
+      - unsigned
+      - bivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - biased: false
+
+.statistics.infotheory:
+  MutualInfo:
+    labels:
+      - undirected
+      - nonlinear
+      - unsigned
+      - bivariate
+      - contemporaneous
+    dependencies:
+      - java
+    configs:
+      - estimator: gaussian
+      - estimator: kraskov
+        prop_k: 4
+
+  TimeLaggedMutualInfo:
+    labels:
+      - directed
+      - nonlinear
+      - unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+      - java
+    configs:
+      - estimator: kraskov
+        prop_k: 4
+
+  TransferEntropy:
+    labels:
+      - directed
+      - nonlinear
+      - unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+      - java
+    configs:
+      - estimator: gaussian
+        k_history: 1
+        l_history: 1
+      - estimator: kraskov
+        prop_k: 4
+        k_history: 1
+        l_history: 1
+
+.statistics.spectral:
+  CoherenceMagnitude:
+    labels:
+      - undirected
+      - linear
+      - unsigned
+      - bivariate
+      - frequency-dependent
+    dependencies:
+    configs:
+      - fmin: 0
+        fmax: 0.25
+
+  ImaginaryCoherence:
+    labels:
+      - undirected
+      - linear
+      - unsigned
+      - bivariate
+      - frequency-dependent
+    dependencies:
+    configs:
+      - fmin: 0
+        fmax: 0.25
+
+  PhaseSlopeIndex:
+    labels:
+      - directed
+      - linear/nonlinear
+      - unsigned
+      - bivariate
+      - frequency-dependent
+    dependencies:
+    configs:
+      - fmin: 0
+        fmax: 0.25
+
+.statistics.misc:
+  PowerEnvelopeCorrelation:
+    labels:
+      - undirected
+      - linear
+      - unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+    configs:
+      - orth: true
+        log: false
+        absolute: false

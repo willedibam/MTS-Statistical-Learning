@@ -1,0 +1,96 @@
+# Basic statistics
+
+.statistics.basic:
+  # Covariance (Pearson's rho via EmpiricalCovariance estimator)
+  Covariance:
+    labels:
+      - undirected
+      - linear
+      - signed
+      - multivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - estimator: EmpiricalCovariance
+
+  # Spearman's correlation coefficient
+  SpearmanR:
+    labels:
+      - undirected
+      - nonlinear
+      - signed
+      - bivariate
+      - contemporaneous
+    dependencies:
+    configs:
+      - squared: False
+
+  # Cross-correlation (standard maximum statistic with significance filtering)
+  CrossCorrelation:
+    labels:
+      - undirected
+      - linear
+      - signed/unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+    configs:
+      - statistic: "max"
+        sigonly: True
+        squared: False
+
+.statistics.distance:
+  # Euclidean distance between series
+  PairwiseDistance:
+    labels:
+      - unsigned
+      - unordered
+      - nonlinear
+      - undirected
+    dependencies:
+    configs:
+      - metric: "euclidean"
+
+  # Dynamic Time Warping alignment cost
+  DynamicTimeWarping:
+    labels:
+      - undirected
+      - nonlinear
+      - unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+    configs:
+      - global_constraint: null
+
+.statistics.infotheory:
+  # Mutual information between series
+  MutualInfo:
+    labels:
+      - undirected
+      - nonlinear
+      - unsigned
+      - bivariate
+      - contemporaneous
+    dependencies:
+      - java
+    configs:
+      - estimator: kraskov
+        prop_k: 4
+
+  # Transfer entropy from source to target
+  TransferEntropy:
+    labels:
+      - directed
+      - nonlinear
+      - unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+      - java
+    configs:
+      - estimator: kraskov
+        prop_k: 4
+        auto_embed_method: MAX_CORR_AIS
+        k_search_max: 10
+        tau_search_max: 4

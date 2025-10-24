@@ -1,0 +1,32 @@
+# --- core numerics (NumPy 1.x to minimize ecosystem friction) ---
+numpy==1.26.4
+scipy==1.11.4
+pandas==2.1.4
+
+# --- plotting & utils ---
+matplotlib==3.8.4
+seaborn==0.13.2
+tqdm==4.66.4
+joblib==1.3.2
+PyYAML==6.0.2
+
+# --- sklearn & stats ---
+scikit-learn==1.4.2
+statsmodels==0.14.1
+
+# --- time-series toolchain pulled by pyspi (and used by your code) ---
+sktime==0.39.0
+scikit-base==0.12.6
+
+# --- DTW implementation (constraints incl. Sakoe-Chiba / Itakura) ---
+dtw-python==1.5.2
+
+# --- Java bridge for info-theory / TE SPIs (JIDT via JPype) ---
+JPype1==1.5.0
+
+# --- I/O for artifacts (parquet + feather) ---
+pyarrow==15.0.2
+fastparquet==2024.5.0
+
+# --- the main library ---
+pyspi>=1.1.0
