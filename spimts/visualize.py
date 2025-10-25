@@ -62,29 +62,121 @@ def _collect_runs(base: str, model_filters=None, run_id: str | None = None, all_
     return rows
 
 
-def _load_artifacts(model_dir: str):
+def _load_artifacts(model_dir: str, spi_filter: list[str] | None = None):
+    """Load artifacts from model directory, optionally filtering to specific SPIs.
+    
+    Args:
+        model_dir: Path to model results directory
+        spi_filter: List of exact SPI names to load (None = load all)
+    
+    Returns:
+        (X, matrices, offdiag, spi_names) where matrices/offdiag only contain filtered SPIs
+    """
     arrays = os.path.join(model_dir, "arrays")
     times_path = os.path.join(arrays, "timeseries.npy")
     X = load_numpy_or_none(times_path)
+    
     # gather all MPIs and offdiags from filenames
     matrices, offdiag, spi_names = {}, {}, []
     for fname in os.listdir(arrays):
         if fname.startswith("mpi_") and fname.endswith(".npy"):
             spi = fname[len("mpi_"):-4]
-            matrices[spi] = np.load(os.path.join(arrays, fname))
-            spi_names.append(spi)
+            # Apply SPI filter if provided
+            if spi_filter is None or spi in spi_filter:
+                matrices[spi] = np.load(os.path.join(arrays, fname))
+                spi_names.append(spi)
         elif fname.startswith("offdiag_") and fname.endswith(".npy"):
             spi = fname[len("offdiag_"):-4]
-            offdiag[spi] = np.load(os.path.join(arrays, fname))
+            # Apply SPI filter if provided
+            if spi_filter is None or spi in spi_filter:
+                offdiag[spi] = np.load(os.path.join(arrays, fname))
+    
     spi_names = sorted(list(set(spi_names)))
     return X, matrices, offdiag, spi_names
 
+def _validate_spi_subset(requested: list[str], available: list[str]) -> list[str]:
+    """Validate SPI subset names against available SPIs, with helpful error messages.
+    
+    Args:
+        requested: List of SPI names user requested
+        available: List of actually available SPI names from arrays/
+    
+    Returns:
+        List of validated SPI names (subset of available)
+    
+    Raises:
+        SystemExit if any requested SPI is not found (with suggestions)
+    """
+    missing = [spi for spi in requested if spi not in available]
+    
+    if missing:
+        print(f"\n[ERR] The following SPIs were not found in cached data:")
+        for spi in missing:
+            # Suggest close matches using simple substring matching
+            suggestions = [a for a in available if spi.lower() in a.lower() or a.lower() in spi.lower()]
+            if not suggestions:
+                # Fallback: Levenshtein-like suggestion (first 3 chars match)
+                prefix = spi[:min(3, len(spi))].lower()
+                suggestions = [a for a in available if a.lower().startswith(prefix)]
+            
+            if suggestions:
+                print(f"  ✗ '{spi}'  (did you mean: {', '.join(suggestions[:3])}?)")
+            else:
+                print(f"  ✗ '{spi}'  (no similar matches found)")
+        
+        print(f"\nAvailable SPIs in this run:")
+        for spi in sorted(available):
+            print(f"  - {spi}")
+        print(f"\n[INFO] Use exact SPI names from arrays/mpi_*.npy files (without 'mpi_' prefix)")
+        raise SystemExit(1)
+    
+    return requested
+
+
+def _select_mpi_spis(all_spis: list[str], mode: str) -> list[str]:
+    """Select which SPIs to generate MPI heatmaps for.
+    
+    Args:
+        all_spis: All available SPI names
+        mode: One of 'none', 'core', 'all', or a number string
+    
+    Returns:
+        List of SPI names to plot
+    """
+    if mode == 'none' or mode == '0':
+        return []
+    
+    if mode == 'all':
+        return all_spis
+    
+    if mode == 'core':
+        # Use substring matching for "core" SPIs
+        core_patterns = ["spearmanr", "cov_", "mi_", "te_", "dtw", "pairwisedistance"]
+        selected = []
+        for spi in all_spis:
+            spi_lower = spi.lower()
+            if any(pattern in spi_lower for pattern in core_patterns):
+                selected.append(spi)
+        return selected[:6] if len(selected) > 6 else selected  # Limit to 6
+    
+    # Try parsing as integer
+    try:
+        limit = int(mode)
+        return all_spis[:limit] if limit > 0 else []
+    except ValueError:
+        print(f"[WARN] Invalid --include-mpi-heatmaps value '{mode}', defaulting to 'core'")
+        return _select_mpi_spis(all_spis, 'core')
+
+
 def main():
     p = argparse.ArgumentParser(description="Visualization-only: read artifacts and plot.")
-    p.add_argument("--profile", choices=["dev","dev+","paper"], default="dev")
+    p.add_argument("--profile", choices=["dev","dev+","dev++","paper"], default="dev")
     p.add_argument("--root", default="./results", help="Results root (contains dev/ and paper/).")
     p.add_argument("--models", default="", help="Comma-separated filter for model folder names (substr match).")
-    p.add_argument("--spi-limit", type=int, default=12, help="Max # of SPI heatmaps per model (visual convenience).")
+    p.add_argument("--include-mpi-heatmaps", default="core", 
+                   help="Which MPI heatmaps to save: 'all', 'core', 'none'/'0', or an integer limit. Default: 'core'")
+    p.add_argument("--spi-subset", action="append", dest="spi_subsets",
+                   help="Comma-separated exact SPI names for subset visualization. Can be used multiple times for multiple subsets. Example: --spi-subset 'mi_kraskov_NN-4,SpearmanR,cov_EmpiricalCovariance'")
     p.add_argument("--run-id", default=None, help="Visualize a specific past run folder under results/<profile> matching <run_id>_<Model>.")
     p.add_argument("--all-runs", action="store_true", help="Process ALL matching runs (by profile/models) instead of only the latest per model.")
 
@@ -95,14 +187,15 @@ def main():
         print(f"[ERR] No such results folder: {base}")
         return
 
-    model_filters = [m.strip().lower() for m in args.models.split(",") if m.strip()]
-
-    base = os.path.join(args.root, args.profile)
-    if not os.path.isdir(base):
-        print(f"[ERR] No such results folder: {base}")
-        return
-
     model_filters = [m.strip() for m in args.models.split(",") if m.strip()]
+    
+    # Parse SPI subsets if provided
+    spi_subsets = []
+    if args.spi_subsets:
+        for subset_str in args.spi_subsets:
+            subset = [s.strip() for s in subset_str.split(",") if s.strip()]
+            if subset:
+                spi_subsets.append(subset)
 
     # NEW: discover runs with optional --run-id / --all-runs filters
     runs = _collect_runs(
@@ -126,40 +219,85 @@ def main():
         fingerprint_dir = ensure_dir(os.path.join(plots_dir, "fingerprint"))
         mts_dir = ensure_dir(os.path.join(plots_dir, "mts"))
 
-        X, matrices, offdiag, spi_names = _load_artifacts(model_dir)
+        # Load ALL available SPIs first (no filter)
+        X, all_matrices, all_offdiag, all_spi_names = _load_artifacts(model_dir, spi_filter=None)
+        
+        # MTS heatmap (always plot)
         if X is not None:
             ax = plot_mts_heatmap(X)
             save_fig(os.path.join(mts_dir, "mts_heatmap.png"), fig=ax.figure)
 
-        # Save up to N MPI heatmaps for quick inspection
-        for i, spi in enumerate(spi_names):
-            if spi not in matrices:
-                continue
-            if i < args.spi_limit:
-                ax = plot_mpi_heatmap(matrices[spi], spi, cbar=True)
+        # MPI heatmaps: controlled by --include-mpi-heatmaps
+        mpi_spis_to_plot = _select_mpi_spis(all_spi_names, args.include_mpi_heatmaps)
+        for spi in mpi_spis_to_plot:
+            if spi in all_matrices:
+                ax = plot_mpi_heatmap(all_matrices[spi], spi, cbar=True)
                 save_fig(os.path.join(mpis_dir, f"mpi_{spi}.png"), fig=ax.figure)
 
-        # SPI-space: ALL SPIs present, preferred first
-        CORE_SPIS = ["SpearmanR", "Covariance", "MutualInfo", "TransferEntropy",
-                    "DynamicTimeWarping", "PairwiseDistance"]
-        preferred = select_core_spis(matrices.keys(), CORE_SPIS)
-        rest = [s for s in matrices.keys() if s not in preferred]
+        # === FULL SPI-SPACE (all SPIs) ===
+        CORE_SPIS = ["SpearmanR", "Covariance", "KendallTau", "MutualInfo", "TimeLaggedMutualInfo","TransferEntropy",
+                    "DynamicTimeWarping", "PairwiseDistance", "CrossCorrelation"]
+        preferred = select_core_spis(all_matrices.keys(), CORE_SPIS)
+        rest = [s for s in all_matrices.keys() if s not in preferred]
         order = preferred + rest
+        
         if len(order) >= 2:
-            plot_spi_space(matrices, order, method="spearman")
-            save_fig(os.path.join(spi_space_dir, "spi_space_spearman.png"))
-            
-            # Individual scatter plots for each SPI pair
-            plot_spi_space_individual(matrices, order, spi_space_individual_dir, method="spearman")
+            # Generate plots for all three correlation methods
+            for method in ["spearman", "kendall", "pearson"]:
+                plot_spi_space(all_matrices, order, method=method)
+                save_fig(os.path.join(spi_space_dir, f"spi_space_{method}.png"))
+                
+                # Individual scatter plots for each SPI pair
+                method_dir = ensure_dir(os.path.join(spi_space_individual_dir, method))
+                plot_spi_space_individual(all_matrices, order, method_dir, method=method)
 
-        # Fingerprints + dendrogram
-        if len(offdiag) >= 2:
-            fp_spis = list(offdiag.keys())
+        # Fingerprints + dendrogram for all three methods (full SPI set)
+        if len(all_offdiag) >= 2:
+            fp_spis = list(all_offdiag.keys())
             if len(fp_spis) >= 2:
-                plot_spi_fingerprint(offdiag, fp_spis, method="spearman")
-                save_fig(os.path.join(fingerprint_dir, "fingerprint_spearman.png"))
-                plot_spi_dendrogram(offdiag, method="spearman", link="average")
-                save_fig(os.path.join(fingerprint_dir, "dendrogram_spearman.png"))
+                for method in ["spearman", "kendall", "pearson"]:
+                    plot_spi_fingerprint(all_offdiag, fp_spis, method=method)
+                    save_fig(os.path.join(fingerprint_dir, f"fingerprint_{method}.png"))
+                    plot_spi_dendrogram(all_offdiag, method=method, link="average")
+                    save_fig(os.path.join(fingerprint_dir, f"dendrogram_{method}.png"))
+        
+        # === SPI SUBSETS (if requested) ===
+        if spi_subsets:
+            subsets_dir = ensure_dir(os.path.join(plots_dir, "subsets"))
+            
+            for subset in spi_subsets:
+                # Validate subset SPIs exist
+                validated_subset = _validate_spi_subset(subset, all_spi_names)
+                
+                # Create folder name: alphabetically sorted, joined by '+'
+                subset_name = "+".join(sorted(validated_subset))
+                subset_dir = ensure_dir(os.path.join(subsets_dir, subset_name))
+                subset_spi_space_dir = ensure_dir(os.path.join(subset_dir, "spi_space"))
+                subset_spi_space_individual_dir = ensure_dir(os.path.join(subset_dir, "spi_space_individual"))
+                subset_fingerprint_dir = ensure_dir(os.path.join(subset_dir, "fingerprint"))
+                
+                # Filter matrices and offdiag to subset
+                subset_matrices = {k: v for k, v in all_matrices.items() if k in validated_subset}
+                subset_offdiag = {k: v for k, v in all_offdiag.items() if k in validated_subset}
+                
+                if len(validated_subset) >= 2:
+                    # Generate subset SPI-space plots
+                    for method in ["spearman", "kendall", "pearson"]:
+                        plot_spi_space(subset_matrices, validated_subset, method=method)
+                        save_fig(os.path.join(subset_spi_space_dir, f"spi_space_{method}.png"))
+                        
+                        # Individual scatter plots
+                        method_dir = ensure_dir(os.path.join(subset_spi_space_individual_dir, method))
+                        plot_spi_space_individual(subset_matrices, validated_subset, method_dir, method=method)
+                    
+                    # Fingerprints + dendrograms for subset
+                    for method in ["spearman", "kendall", "pearson"]:
+                        plot_spi_fingerprint(subset_offdiag, validated_subset, method=method)
+                        save_fig(os.path.join(subset_fingerprint_dir, f"fingerprint_{method}.png"))
+                        plot_spi_dendrogram(subset_offdiag, method=method, link="average")
+                        save_fig(os.path.join(subset_fingerprint_dir, f"dendrogram_{method}.png"))
+                    
+                    print(f"      [SUBSET] {subset_name} ({len(validated_subset)} SPIs)")
 
 if __name__ == "__main__":
     main()

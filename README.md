@@ -101,13 +101,17 @@ results/performance/                # Performance metrics & plots
 python -m spimts visualize
 
 # Specific models, latest runs
-python -m spimts visualize --models "VAR(1),Kuramoto"
+python -m spimts visualize --profile dev++ --models "VAR(1),Kuramoto" #this gets the **latest** VAR(1),Kuramoto models in the results/dev++/... directory
 
-# Specific past run by ID
+# Specific past run by ID - YYYYMMDD-HHMMSS or <hash>
+python -m spimts visualize --run-id 20251024-233652
 python -m spimts visualize --run-id 20251024-233652
 
-# All runs for Kuramoto in dev+ profile
-python -m spimts visualize --profile dev+ --models Kuramoto --all-runs
+# All runs for Kuramoto and VAR(1) in dev+ profile
+python -m spimts visualize --profile dev+ --models "Kuramoto,VAR(1)" --all-runs
+
+# Multiple models, latest of each in results/<profile>/...
+python -m spimts visualize --profile dev+ --models "Kuramoto,VAR(1)"
 
 # High-quality plots with many SPIs
 python -m spimts visualize --spi-limit 100
@@ -116,22 +120,33 @@ python -m spimts visualize --spi-limit 100
 ### Generated Plots
 
 ```
-results/<mode>/<run_id>_<Model>/plots/
-├── mts/
-│   └── mts_heatmap.png                    # Time series heatmap
-├── mpis/
-│   ├── mpi_SpearmanR.png                  # Individual MPI heatmaps
-│   ├── mpi_Covariance.png
-│   └── ... (up to --spi-limit)
-├── spi_space/
-│   └── spi_space_spearman.png             # Full SPI-space grid
-├── spi_space_individual/
-│   ├── SpearmanR_vs_Covariance.png        # Individual scatter plots
-│   ├── SpearmanR_vs_MutualInfo.png        # n(n-1)/2 plots total
-│   └── ...
-└── fingerprint/
-    ├── fingerprint_spearman.png           # SPI correlation barcode
-    └── dendrogram_spearman.png            # Hierarchical clustering
+results/dev++/20251024-170017_8a25574d_VAR(1)/
+└── plots/
+    ├── mpis/
+    │   ├── mpi_SpearmanR.png          ← overwritten
+    │   ├── mpi_Covariance.png         ← overwritten
+    │   └── ...
+    ├── spi_space/
+    │   ├── spi_space_spearman.png     ← overwritten
+    │   ├── spi_space_kendall.png      ← NEW (first time)
+    │   └── spi_space_pearson.png      ← NEW (first time)
+    ├── spi_space_individual/
+    │   ├── spearman/
+    │   │   ├── SpearmanR_vs_Covariance.png  ← overwritten
+    │   │   └── ...
+    │   ├── kendall/                    ← NEW subfolder
+    │   │   └── ...
+    │   └── pearson/                    ← NEW subfolder
+    │       └── ...
+    ├── fingerprint/
+    │   ├── fingerprint_spearman.png   ← overwritten
+    │   ├── fingerprint_kendall.png    ← NEW
+    │   ├── fingerprint_pearson.png    ← NEW
+    │   ├── dendrogram_spearman.png    ← overwritten
+    │   ├── dendrogram_kendall.png     ← NEW
+    │   └── dendrogram_pearson.png     ← NEW
+    └── mts/
+        └── mts_heatmap.png            ← overwritten
 ```
 
 ---

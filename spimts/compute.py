@@ -22,40 +22,40 @@ from spimts.generators import (
 # --------------------- profiles (dev vs paper) -------------------------
 PROFILES = {
     "dev": {
-        "VAR(1)": dict(M=4, T=1000),
-        "OU-network": dict(M=4, T=1000),
-        "Kuramoto": dict(M=4, T=2000),
-        "Stuart-Landau": dict(M=4, T=2000),
-        "Lorenz-96": dict(M=4, T=3000),
-        "Rössler-coupled": dict(M=4, T=4000),
-        "CML-logistic": dict(M=4, T=1500),
-        "OU-heavyTail": dict(M=4, T=1000),
-        "GBM-returns": dict(M=4, T=1500),
-        "TimeWarp-clones": dict(M=4, T=1500),
+        "VAR(1)": dict(M=4, T=500),
+        "OU-network": dict(M=4, T=500),
+        "Kuramoto": dict(M=4, T=500),
+        "Stuart-Landau": dict(M=4, T=500),
+        "Lorenz-96": dict(M=4, T=500),
+        "Rössler-coupled": dict(M=4, T=500),
+        "CML-logistic": dict(M=4, T=500),
+        "OU-heavyTail": dict(M=4, T=500),
+        "GBM-returns": dict(M=4, T=500),
+        "TimeWarp-clones": dict(M=4, T=500),
     },
     "dev+": {
-        "VAR(1)": dict(M=10, T=2000),
-        "OU-network": dict(M=10, T=2000),
-        "Kuramoto": dict(M=10, T=5000),
-        "Stuart-Landau": dict(M=10, T=5000),
-        "Lorenz-96": dict(M=10, T=5000),
-        "Rössler-coupled": dict(M=10, T=4000),
-        "CML-logistic": dict(M=20, T=1000),
-        "OU-heavyTail": dict(M=10, T=2000),
-        "GBM-returns": dict(M=10, T=3000),
-        "TimeWarp-clones": dict(M=10, T=3000),
+        "VAR(1)": dict(M=10, T=1000),
+        "OU-network": dict(M=10, T=1000),
+        "Kuramoto": dict(M=10, T=1000),
+        "Stuart-Landau": dict(M=10, T=1000),
+        "Lorenz-96": dict(M=10, T=1000),
+        "Rössler-coupled": dict(M=10, T=1000),
+        "OU-heavyTail": dict(M=10, T=1000),
+        "GBM-returns": dict(M=10, T=1000),
+        "TimeWarp-clones": dict(M=10, T=1000),
+        "CML-logistic": dict(M=20, T=500),
     },
     "dev++": {
-        "VAR(1)": dict(M=15, T=3000),
-        "OU-network": dict(M=15, T=3000),
-        "Kuramoto": dict(M=15, T=7500),
-        "Stuart-Landau": dict(M=15, T=7500),
-        "Lorenz-96": dict(M=15, T=12000),
-        "Rössler-coupled": dict(M=10, T=12000),
-        "OU-heavyTail": dict(M=15, T=3000),
-        "GBM-returns": dict(M=15, T=4000),
-        "TimeWarp-clones": dict(M=15, T=3000),
-        "CML-logistic": dict(M=25, T=5000),
+        "VAR(1)": dict(M=15, T=1000),
+        "OU-network": dict(M=15, T=1000),
+        "Kuramoto": dict(M=15, T=1000),
+        "Stuart-Landau": dict(M=15, T=1000),
+        "Lorenz-96": dict(M=15, T=1000),
+        "Rössler-coupled": dict(M=15, T=1000),
+        "OU-heavyTail": dict(M=15, T=1000),
+        "GBM-returns": dict(M=15, T=1000),
+        "TimeWarp-clones": dict(M=15, T=1000),
+        "CML-logistic": dict(M=25, T=500),
     },
     "paper": {
         "VAR(1)": dict(M=20, T=4000),
@@ -284,7 +284,7 @@ def _check_memory_warning(required_mb: float) -> str | None:
     """Check if memory might be insufficient and return warning if needed."""
     mem = _get_memory_usage()
     if mem["available_mb"] < required_mb * 1.5:  # 1.5x safety margin
-        return f"⚠️  Low memory: {mem['available_mb']:.0f}MB available, ~{required_mb:.0f}MB needed"
+        return f"[WARN] Low memory: {mem['available_mb']:.0f}MB available, ~{required_mb:.0f}MB needed"
     return None
 
 def _estimate_memory_required(M: int, T: int, n_spis: int = 50) -> float:
@@ -355,7 +355,7 @@ def _save_performance_metrics(perf_data: List[dict], outdir: str):
         plot_path = os.path.join(perf_dir, f"perf_plots_{timestamp}.png")
         plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close()
-        print(f"[PERF] Metrics saved → {perf_dir}/")
+        print(f"[PERF] Metrics saved to {perf_dir}/")
     except Exception as e:
         print(f"[WARN] Performance plot generation failed: {e}")
 
@@ -430,29 +430,54 @@ def main():
     
     # Dry-run mode: preview what will be computed
     if args.dry_run:
+        models_to_compute = []
+        models_skipped = []
+        
+        for model, gen in generators.items():
+            params = profile[model]
+            M, T = params['M'], params['T']
+            
+            # Check if should skip
+            if args.skip_existing:
+                exists, existing_path = _model_already_computed(base, model, M, T)
+                if exists:
+                    models_skipped.append((model, M, T, os.path.basename(existing_path)))
+                    continue
+            
+            models_to_compute.append((model, M, T))
+        
         print(f"\n{'='*70}")
-        print(f"DRY RUN - Would compute {len(generators)} model(s) in '{args.mode}' mode")
+        print(f"DRY RUN - Would compute {len(models_to_compute)} model(s) in '{args.mode}' mode")
+        if models_skipped:
+            print(f"          ({len(models_skipped)} model(s) will be skipped)")
         print(f"{'='*70}\n")
         print(f"Config: {os.path.basename(configfile)} (hash: {confighash})")
         print(f"Output: {base}\n")
         
-        total_edges = 0
-        total_datapoints = 0
-        for model, gen in generators.items():
-            params = profile[model]
-            M, T = params['M'], params['T']
-            edges = M * (M - 1)
-            datapoints = M * T
-            est_mem = _estimate_memory_required(M, T)
+        if models_to_compute:
+            print("Models to compute:")
+            total_edges = 0
+            total_datapoints = 0
+            for model, M, T in models_to_compute:
+                edges = M * (M - 1)
+                datapoints = M * T
+                est_mem = _estimate_memory_required(M, T)
+                
+                total_edges += edges
+                total_datapoints += datapoints
+                
+                print(f"  - {model:20s} M={M:2d}, T={T:5d}  =>  {edges:4d} edges, {datapoints:7d} datapoints, ~{est_mem:.0f}MB")
             
-            total_edges += edges
-            total_datapoints += datapoints
-            
-            print(f"  • {model:20s} M={M:2d}, T={T:5d}  →  {edges:4d} edges, {datapoints:7d} datapoints, ~{est_mem:.0f}MB")
+            print(f"\n{'='*70}")
+            print(f"Total: {total_edges:,} edges, {total_datapoints:,} datapoints")
+            print(f"{'='*70}\n")
         
-        print(f"\n{'='*70}")
-        print(f"Total: {total_edges:,} edges, {total_datapoints:,} datapoints")
-        print(f"{'='*70}\n")
+        if models_skipped:
+            print("Models to skip (already computed):")
+            for model, M, T, folder in models_skipped:
+                print(f"  [SKIP] {model:20s} M={M:2d}, T={T:5d}  (found: {folder})")
+            print()
+        
         return
 
     # Track performance metrics
@@ -473,7 +498,7 @@ def main():
         if args.skip_existing:
             exists, existing_path = _model_already_computed(base, model, M, T)
             if exists:
-                print(f"[{idx}/{total_models}] {model:20s} ⏭️  SKIPPED (exists: {os.path.basename(existing_path)})")
+                print(f"[{idx}/{total_models}] {model:20s} [SKIP] (exists: {os.path.basename(existing_path)})")
                 continue
         
         # Generate run_id for new computation
@@ -570,10 +595,10 @@ def main():
             eta_seconds = avg_time_per_model * remaining_models
             
             # Success output with timing
-            print(f"✓ {len(spi_names):2d} SPIs | {_format_time(model_elapsed)} | ETA: {_format_time(eta_seconds)}")
+            print(f"[OK] {len(spi_names):2d} SPIs | {_format_time(model_elapsed)} | ETA: {_format_time(eta_seconds)}")
             
         except Exception as e:
-            print(f"✗ FAILED: {e}")
+            print(f"[ERR] FAILED: {e}")
             import traceback
             traceback.print_exc()
     

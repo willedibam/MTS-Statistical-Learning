@@ -30,11 +30,50 @@ def plot_mpi_heatmap(matrix: np.ndarray, spi: str, cbar: bool = False, ax=None):
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 5), dpi=150)
         created = True
-    # basic bounds: MI >= 0, others often [-1,1]
-    lower_zero = spi.lower().startswith("mi_") or spi.lower().startswith("tlmi_") or spi.lower().startswith("te_")
-    vmin = 0.0 if lower_zero else -1.0
-    vmax = None if lower_zero else 1.0
-    center = None if lower_zero else 0.0
+    
+    # Determine appropriate bounds based on SPI type and actual data
+    spi_lower = spi.lower()
+    
+    # Correlation-like measures: bounded [-1, 1]
+    correlation_spis = ["spearmanr", "pearsonr", "kendalltau", "crosscorr", "partialcorr"]
+    # Information-theoretic measures: non-negative, unbounded
+    info_spis = ["mi_", "tlmi_", "te_", "cmi_", "mutualinfo"]
+    # Distance measures: non-negative, unbounded
+    distance_spis = ["dtw", "dynamictimewarping", "pairwisedistance", "euclidean", "manhattan"]
+    # Covariance: unbounded, can be negative
+    covariance_spis = ["cov", "covariance"]
+    
+    # Classify SPI and set appropriate bounds
+    if any(s in spi_lower for s in correlation_spis):
+        # Correlation-like: [-1, 1] with center at 0
+        vmin, vmax, center = -1.0, 1.0, 0.0
+    elif any(spi_lower.startswith(s) for s in info_spis):
+        # Information-theoretic: [0, data_max]
+        vmin, vmax, center = 0.0, None, None
+    elif any(s in spi_lower for s in distance_spis):
+        # Distance: [0, data_max]
+        vmin, vmax, center = 0.0, None, None
+    elif any(s in spi_lower for s in covariance_spis):
+        # Covariance: data-driven symmetric around 0
+        vmin, vmax, center = None, None, 0.0
+    else:
+        # Unknown SPI: use data-driven bounds
+        vmin, vmax, center = None, None, None
+    
+    # For data-driven bounds, compute from actual values
+    if vmin is None or vmax is None:
+        finite_vals = matrix[np.isfinite(matrix)]
+        if len(finite_vals) > 0:
+            data_min, data_max = np.min(finite_vals), np.max(finite_vals)
+            if vmin is None:
+                vmin = data_min
+            if vmax is None:
+                vmax = data_max
+            # For symmetric ranges around center, ensure symmetry
+            if center is not None and vmin is not None and vmax is not None:
+                max_abs = max(abs(vmin - center), abs(vmax - center))
+                vmin, vmax = center - max_abs, center + max_abs
+    
     sns.heatmap(matrix, vmin=vmin, vmax=vmax, center=center, cmap="icefire",
                 annot=False, square=True, xticklabels=False, yticklabels=False,
                 cbar=cbar, cbar_kws={"shrink": .8}, linewidths=.4, ax=ax)
@@ -83,12 +122,25 @@ def plot_spi_space(matrices: Dict[str, np.ndarray], spi_names: List[str], method
                 ok = (np.all(np.isfinite(x)) and np.all(np.isfinite(y))
                       and np.std(x) > 0 and np.std(y) > 0)
                 r = _score_pair(x, y, method) if ok else np.nan
-                ax.scatter(x, y, alpha=0.5, s=5, marker='o')
-                try:
-                    z = np.polyfit(x, y, 1); ax.plot(x, np.poly1d(z)(x), "r--", alpha=0.7)
-                except Exception:
-                    pass
+                # Gray dots, larger size, medium transparency
+                ax.scatter(x, y, alpha=0.7, s=12, marker='.', color='gray')
+                
+                # Color-coded regression line based on correlation strength
+                if ok:
+                    try:
+                        # RdYlBu_r: Red(+1) -> Yellow(0) -> Blue(-1), avoids white at zero
+                        cmap = plt.cm.RdYlBu_r
+                        norm_r = (r + 1) / 2  # Map [-1, 1] to [0, 1]
+                        line_color = cmap(norm_r)
+                        
+                        z = np.polyfit(x, y, 1)
+                        ax.plot(x, np.poly1d(z)(x), color=line_color, linestyle='--', 
+                               alpha=0.8, linewidth=1.5)
+                    except Exception:
+                        pass
+                
                 ax.set_xlabel(a); ax.set_ylabel(b); ax.set_title(f"{method}: {r:.2f}" if np.isfinite(r) else f"{method}: nan")
+                # Let matplotlib auto-scale axes (no forced aspect ratio)
             else:
                 ax.set_visible(False)
     plt.tight_layout()
@@ -135,13 +187,15 @@ def plot_spi_space_individual(matrices: Dict[str, np.ndarray], spi_names: List[s
             
             # Create individual SQUARE figure
             fig, ax = plt.subplots(figsize=(6, 6), dpi=150)
-            ax.scatter(x, y, alpha=0.5, s=10, marker='o')
+            # Gray dots, larger size, medium transparency
+            ax.scatter(x, y, alpha=0.7, s=15, marker='o', color='gray')
             
-            # Add regression line if possible
+            # Add regression line in soft teal (single pastel color)
             if ok:
                 try:
                     z = np.polyfit(x, y, 1)
-                    ax.plot(x, np.poly1d(z)(x), "r--", alpha=0.7, linewidth=2)
+                    ax.plot(x, np.poly1d(z)(x), color='#4ECDC4', linestyle='--', 
+                           alpha=0.85, linewidth=2.5)
                 except Exception:
                     pass
             
@@ -149,6 +203,7 @@ def plot_spi_space_individual(matrices: Dict[str, np.ndarray], spi_names: List[s
             ax.set_ylabel(b, fontsize=12)
             # Title shows only correlation value with appropriate symbol
             ax.set_title(f"{symbol} = {r:.3f}" if np.isfinite(r) else f"{symbol} = nan", fontsize=13)
+            ax.set_aspect('equal', adjustable='datalim')  # Square aspect, flexible limits
             ax.grid(True, alpha=0.3)
             plt.tight_layout()
             

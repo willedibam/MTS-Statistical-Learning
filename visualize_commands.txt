@@ -1,0 +1,101 @@
+# ========== VISUALIZATION COMMANDS ==========
+# All commands use the updated visualize.py with:
+# - Fixed plot_spi_space aspect ratios (auto-scaling, gray dots, RdYlBu_r colormap)
+# - Fixed plot_spi_space_individual (gray dots, soft teal regression line)
+# - --include-mpi-heatmaps flag (replaces --spi-limit)
+# - --spi-subset flag for targeted SPI combinations
+
+# ========== COMMAND 1: FULL VISUALIZATION (All dev++ models, all SPIs) ==========
+# This generates plots for ALL SPIs in each model using all 3 correlation methods
+# Estimated time: 15-30 minutes for 16 models
+python -m spimts visualize --profile dev++ --all-runs --include-mpi-heatmaps core 2>&1 | Tee-Object .\logs\visualize_dev++_all_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+# Alternative: Skip MPI heatmaps entirely (faster)
+python -m spimts visualize --profile dev++ --all-runs --include-mpi-heatmaps none 2>&1 | Tee-Object .\logs\visualize_dev++_all_noMPI_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+# Alternative: Save ALL MPI heatmaps (slower, more disk space)
+python -m spimts visualize --profile dev++ --all-runs --include-mpi-heatmaps all 2>&1 | Tee-Object .\logs\visualize_dev++_all_allMPI_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+
+# ========== COMMAND 2: TARGETED SPI SUBSETS (All models, specific SPI combinations) ==========
+# Example: Test 3 different SPI subsets across all models
+# Subset 1: {MI, Spearman, Covariance} - 3 SPIs
+# Subset 2: {TE, MI} - 2 SPIs  
+# Subset 3: {Spearman, Covariance} - 2 SPIs
+
+# IMPORTANT: Use EXACT SPI names from your cached data
+# To find exact names: ls results\dev++\<any_run>\arrays\mpi_*.npy
+
+# Example with placeholder names (replace with actual names):
+python -m spimts visualize --profile dev++ --all-runs --include-mpi-heatmaps none --spi-subset "mi_kraskov_NN-4,SpearmanR,cov_EmpiricalCovariance" --spi-subset "te_kraskov_NN-4,mi_kraskov_NN-4" --spi-subset "SpearmanR,cov_EmpiricalCovariance" 2>&1 | Tee-Object .\logs\visualize_dev++_subsets_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+# Check your actual SPI names first:
+Get-ChildItem results\dev++\*\arrays\mpi_*.npy | Select-Object -First 20 | ForEach-Object { $_.Name -replace '^mpi_', '' -replace '\.npy$', '' }
+
+
+# ========== COMMAND 3: SINGLE MODEL TESTING (Faster iteration) ==========
+# Test on a single model (e.g., Kuramoto) before running full batch
+python -m spimts visualize --profile dev++ --models "Kuramoto" --include-mpi-heatmaps core 2>&1 | Tee-Object .\logs\visualize_dev++_Kuramoto_test_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+# Test subsets on single model
+python -m spimts visualize --profile dev++ --models "Kuramoto" --include-mpi-heatmaps none --spi-subset "mi_kraskov_NN-4,SpearmanR,cov_EmpiricalCovariance" 2>&1 | Tee-Object .\logs\visualize_dev++_Kuramoto_subset_test_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+
+# ========== COMMAND 4: SPECIFIC MODELS ONLY ==========
+# Visualize only specific models (e.g., Kuramoto and Lorenz-96)
+python -m spimts visualize --profile dev++ --models "Kuramoto,Lorenz-96" --all-runs --include-mpi-heatmaps core 2>&1 | Tee-Object .\logs\visualize_dev++_selected_models_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+
+# ========== DIAGNOSTIC: CHECK WHAT SPIs ARE AVAILABLE ==========
+# List all available SPI names from a completed run
+$sampleRun = Get-ChildItem results\dev++\*Kuramoto | Select-Object -First 1
+Get-ChildItem "$($sampleRun.FullName)\arrays\mpi_*.npy" | ForEach-Object { 
+    $_.Name -replace '^mpi_', '' -replace '\.npy$', '' 
+} | Sort-Object
+
+
+# ========== OUTPUT STRUCTURE ==========
+# After running, your results structure will look like:
+# results/dev++/<run_id>_<model>/
+# ├── arrays/           # Unchanged (cached SPI matrices)
+# ├── csv/              # Unchanged
+# ├── meta.json         # Unchanged
+# └── plots/
+#     ├── mts/          # MTS heatmap
+#     ├── mpis/         # MPI heatmaps (controlled by --include-mpi-heatmaps)
+#     ├── spi_space/    # FULL SPI set (all ~20 SPIs)
+#     │   ├── spi_space_spearman.png
+#     │   ├── spi_space_kendall.png
+#     │   └── spi_space_pearson.png
+#     ├── spi_space_individual/  # FULL SPI set individual plots
+#     │   ├── spearman/
+#     │   ├── kendall/
+#     │   └── pearson/
+#     ├── fingerprint/  # FULL SPI set fingerprints/dendrograms
+#     └── subsets/      # NEW: Only if --spi-subset used
+#         ├── mi_kraskov_NN-4+SpearmanR+cov_EmpiricalCovariance/
+#         │   ├── spi_space/
+#         │   ├── spi_space_individual/
+#         │   └── fingerprint/
+#         └── te_kraskov_NN-4+mi_kraskov_NN-4/
+#             └── ...
+
+
+# ========== NOTES ==========
+# 1. --include-mpi-heatmaps options:
+#    - 'none' or '0': No MPI heatmaps (fastest)
+#    - 'core': ~6 core SPIs using substring matching
+#    - 'all': All available SPIs (slowest, most disk space)
+#    - '<number>': First N SPIs (e.g., '10')
+#
+# 2. --spi-subset:
+#    - Use exact SPI names (case-sensitive)
+#    - Comma-separated for each subset
+#    - Can specify multiple subsets with multiple --spi-subset flags
+#    - Validation with helpful error messages if names don't match
+#
+# 3. Tee-Object shows output in terminal AND saves to log file
+#
+# 4. New plot styling:
+#    - plot_spi_space: Gray dots (alpha=0.7, s=12), RdYlBu_r colormap for regression lines
+#    - plot_spi_space_individual: Gray dots (alpha=0.7, s=15), soft teal (#4ECDC4) regression line

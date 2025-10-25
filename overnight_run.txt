@@ -1,5 +1,5 @@
-# run before bed
-python -m spimts compute --mode dev++ > dev++_overnight.log 2>&1
+# ========== GENERAL COMMANDS HYGIENE ==========
+python -m spimts.compute --mode <>  dev++_overnight.log 2>&1
 
 # check progress when awake
 Get-Content dev++_overnight.log -Tail 30
@@ -8,4 +8,112 @@ Get-Content dev++_overnight.log -Tail 30
 powercfg /change standby-timeout-ac 0
 powercfg /change standby-timeout-dc 0
 
-# visualise results in monitoringpython -m spimts visualize --profile dev++
+# visualise results in monitoring
+python -m spimts visualize --profile dev++
+
+
+Get-ChildItem "results\dev++\" -Directory | Select-Object Name #shows results
+
+Get-Content "results\dev++\20251025-080758_feb737a1_OU-network\meta.json" #shows meta.json configs
+
+#output locations
+Get-ChildItem results\dev++\*\plots -Directory | Select-Object FullName
+
+# Backup existing plots (optional)
+Copy-Item -Recurse results\dev++\20251024-170017_8a25574d_VAR(1)\plots results\dev++\20251024-170017_8a25574d_VAR(1)\plots_backup_$(Get-Date -Format 'yyyyMMdd-HHmmss')
+
+# ========== NEW VISUALIZATION COMMANDS (Updated 2025-10-25) ==========
+# See QUICKSTART_VISUALIZE.md for detailed documentation
+
+# STEP 1: Test on single model first
+python -m spimts visualize --profile dev++ --models "Kuramoto" --include-mpi-heatmaps core
+
+# STEP 2: Full visualization (all models, all SPIs, 3 correlation methods)
+python -m spimts visualize --profile dev++ --all-runs --include-mpi-heatmaps core 2>&1 | Tee-Object .\logs\visualize_dev++_full_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+# STEP 3: Targeted SPI subsets (example: MI-Spearman-Covariance trio)
+python -m spimts visualize --profile dev++ --all-runs --include-mpi-heatmaps none --spi-subset "mi_kraskov_NN-4,spearmanr,cov_EmpiricalCovariance" 2>&1 | Tee-Object .\logs\visualize_dev++_subset_$(Get-Date -Format 'yyyyMMdd-HHmmss').log
+
+# Check available SPI names
+$sampleRun = Get-ChildItem results\dev++\*Kuramoto | Select-Object -First 1; Get-ChildItem "$($sampleRun.FullName)\arrays\mpi_*.npy" | ForEach-Object { $_.Name -replace '^mpi_', '' -replace '\.npy$', '' } | Sort-Object
+
+# ========== DIAGNOSTIC COMMANDS ==========
+# ═══════════════════════════════════════════════════════
+# DIAGNOSTIC COMMANDS - Post-Visualization Check
+# ═══════════════════════════════════════════════════════
+
+# 1. CHECK LOG FILE STATUS
+Get-Item visualize_all_dev++.log | Select-Object Name, CreationTime, LastWriteTime, Length
+
+# 2. LIST ALL PLOT DIRECTORIES WITH MODIFICATION TIMES (shows what was updated)
+Get-ChildItem results\dev++\*\plots -Directory | 
+    Select-Object @{N='Model';E={($_.FullName -split '\\')[-2]}}, LastWriteTime | 
+    Sort-Object LastWriteTime -Descending | Format-Table -AutoSize
+
+# 3. COUNT PLOTS PER MODEL (shows if new plots were created)
+Get-ChildItem results\dev++\*\plots -Directory | ForEach-Object {
+    $modelName = ($_.FullName -split '\\')[-2]
+    $fileCount = (Get-ChildItem $_.FullName -Recurse -File -Filter *.png).Count
+    [PSCustomObject]@{
+        Model = $modelName
+        TotalPlots = $fileCount
+        LastModified = $_.LastWriteTime
+    }
+} | Sort-Object LastModified -Descending | Format-Table -AutoSize
+
+# 4. FIND RECENTLY MODIFIED PLOTS (last 2 hours)
+$cutoff = (Get-Date).AddHours(-2)
+Get-ChildItem results\dev++\*\plots\*.png -Recurse -File | 
+    Where-Object { $_.LastWriteTime -gt $cutoff } | 
+    Select-Object @{N='Model';E={($_.DirectoryName -split '\\')[-3]}}, Name, LastWriteTime | 
+    Sort-Object LastWriteTime -Descending | Format-List
+
+# 5. CHECK FOR KENDALL/PEARSON SUBDIRECTORIES (new feature)
+Get-ChildItem results\dev++\*\plots\spi_space_individual\kendall -Directory -ErrorAction SilentlyContinue | 
+    Select-Object @{N='Model';E={($_.FullName -split '\\')[-4]}}, LastWriteTime
+
+Get-ChildItem results\dev++\*\plots\spi_space_individual\pearson -Directory -ErrorAction SilentlyContinue | 
+    Select-Object @{N='Model';E={($_.FullName -split '\\')[-4]}}, LastWriteTime
+
+# 6. COUNT PLOTS BY TYPE IN ONE MODEL (to verify structure)
+$sampleModel = "20251025-081150_25e48d9a_Kuramoto"
+Get-ChildItem "results\dev++\$sampleModel\plots" -Recurse -File -Filter *.png | 
+    Group-Object {$_.DirectoryName -replace '.*\\plots\\',''} | 
+    Select-Object @{N='Directory';E={$_.Name}}, Count | 
+    Format-Table -AutoSize
+
+# 7. LIST ALL LOG FILES WITH SIZES
+Get-ChildItem *.log | Select-Object Name, Length, LastWriteTime | Sort-Object LastWriteTime -Descending
+
+# 8. CHECK PYTHON EXIT CODE FROM LAST COMMAND
+Write-Output "Last exit code: $LASTEXITCODE"
+
+# 9. COMPARE FILE COUNTS BEFORE/AFTER (run this BEFORE next visualization)
+$beforeCount = (Get-ChildItem results\dev++\*\plots\*.png -Recurse).Count
+Write-Output "Total PNG files currently: $beforeCount"
+
+
+# 1. Check if plots were actually updated
+Get-ChildItem results\dev++\*\plots -Directory | 
+    Select-Object @{N='Model';E={($_.FullName -split '\\')[-2]}}, LastWriteTime | 
+    Sort-Object LastWriteTime -Descending
+
+# 2. Run a verbose test to see output
+python -m spimts visualize --profile dev++ --models "VAR" --all-runs
+
+# 3. If you want to re-run with visible output:
+python -m spimts visualize --profile dev++ --all-runs 2>&1 | Tee-Object visualize_dev++_all_NEW.log
+
+
+########## ===more to sort whre they go ====
+# 1. PREVIEW what will be deleted (safe check first)
+Get-ChildItem results\dev++\*\plots\spi_space_individual\*.png -File | 
+    Select-Object FullName, LastWriteTime | 
+    Format-Table -AutoSize
+
+# 2. COUNT how many files will be deleted
+$toDelete = Get-ChildItem results\dev++\*\plots\spi_space_individual\*.png -File
+Write-Output "Will delete $($toDelete.Count) PNG files"
+
+# 3. DELETE them (only .png files directly in spi_space_individual\, not in subdirs)
+Get-ChildItem results\dev++\*\plots\spi_space_individual\*.png -File | Remove-Item -Verbose
