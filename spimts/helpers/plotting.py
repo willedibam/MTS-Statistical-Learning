@@ -190,7 +190,7 @@ def plot_spi_space_individual(matrices: Dict[str, np.ndarray], spi_names: List[s
             # Gray dots, larger size, medium transparency
             ax.scatter(x, y, alpha=0.7, s=15, marker='o', color='gray')
             
-            # Add regression line in soft teal (single pastel color)
+            # Add regression line in soft teal #4ECDC4/ purple #B19CD9/coral #FA8072 (single pastel color)
             if ok:
                 try:
                     z = np.polyfit(x, y, 1)

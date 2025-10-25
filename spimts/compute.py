@@ -16,12 +16,15 @@ from pyspi.calculator import Calculator
 from spimts.generators import (
     gen_var, gen_ou_network, gen_kuramoto, gen_stuart_landau,
     gen_lorenz96, gen_rossler_coupled, gen_cml_logistic,
-    gen_ou_heavytail, gen_gbm_returns, gen_timewarp_clones
+    gen_ou_heavytail, gen_gbm_returns, gen_timewarp_clones,
+    gen_cauchy_ou, gen_unidirectional_cascade, gen_quadratic_coupling,
+    gen_exponential_transform, gen_phase_lagged_oscillators
 )
 
 # --------------------- profiles (dev vs paper) -------------------------
 PROFILES = {
     "dev": {
+        # Fast testing: M=4 (6 edges), T=500 (~2-3 min per model)
         "VAR(1)": dict(M=4, T=500),
         "OU-network": dict(M=4, T=500),
         "Kuramoto": dict(M=4, T=500),
@@ -32,8 +35,14 @@ PROFILES = {
         "OU-heavyTail": dict(M=4, T=500),
         "GBM-returns": dict(M=4, T=500),
         "TimeWarp-clones": dict(M=4, T=500),
+        "Cauchy-OU": dict(M=4, T=500),
+        "Unidirectional-Cascade": dict(M=4, T=500),
+        "Quadratic-Coupling": dict(M=4, T=500),
+        "Exponential-Transform": dict(M=4, T=500),
+        "Phase-Lagged-Oscillators": dict(M=4, T=500),
     },
     "dev+": {
+        # Medium testing: M=10 (45 edges), T=1000 (~10-15 min per model)
         "VAR(1)": dict(M=10, T=1000),
         "OU-network": dict(M=10, T=1000),
         "Kuramoto": dict(M=10, T=1000),
@@ -44,8 +53,14 @@ PROFILES = {
         "GBM-returns": dict(M=10, T=1000),
         "TimeWarp-clones": dict(M=10, T=1000),
         "CML-logistic": dict(M=20, T=500),
+        "Cauchy-OU": dict(M=10, T=1000),
+        "Unidirectional-Cascade": dict(M=10, T=1000),
+        "Quadratic-Coupling": dict(M=10, T=1000),
+        "Exponential-Transform": dict(M=10, T=1000),
+        "Phase-Lagged-Oscillators": dict(M=10, T=1500),
     },
     "dev++": {
+        # Validation: M=15 (105 edges), T=1000-2000 (~20-30 min per model)
         "VAR(1)": dict(M=15, T=1000),
         "OU-network": dict(M=15, T=1000),
         "Kuramoto": dict(M=15, T=1000),
@@ -56,18 +71,50 @@ PROFILES = {
         "GBM-returns": dict(M=15, T=1000),
         "TimeWarp-clones": dict(M=15, T=1000),
         "CML-logistic": dict(M=25, T=500),
+        "Cauchy-OU": dict(M=15, T=1000),
+        "Unidirectional-Cascade": dict(M=15, T=1000),
+        "Quadratic-Coupling": dict(M=15, T=1000),
+        "Exponential-Transform": dict(M=15, T=1000),
+        "Phase-Lagged-Oscillators": dict(M=15, T=2000),
+    },
+    "dev+++": {
+        # Overnight run: M=25-35 (300-595 edges), T=1500-2500 (~30-60 min per model)
+        # Prioritize M for SPI-SPI correlation power, keep T sufficient
+        # Total runtime: ~8-12 hours for 15 models
+        "VAR(1)": dict(M=30, T=1500),
+        "OU-network": dict(M=30, T=1500),
+        "Kuramoto": dict(M=30, T=2500, transients=2000),  # Phase locking needs longer
+        "Stuart-Landau": dict(M=30, T=2500, transients=1500),  # Limit cycle convergence
+        "Lorenz-96": dict(M=30, T=2000, transients=1000),  # Chaotic settling
+        "Rössler-coupled": dict(M=25, T=3000, transients=2000),  # Longer for coupled attractor
+        "OU-heavyTail": dict(M=30, T=1500),
+        "GBM-returns": dict(M=30, T=2000),
+        "TimeWarp-clones": dict(M=30, T=1500),
+        "CML-logistic": dict(M=35, T=1000, transients=500),  # Map transients fast, cheap per step
+        "Cauchy-OU": dict(M=30, T=1500),
+        "Unidirectional-Cascade": dict(M=30, T=1500),
+        "Quadratic-Coupling": dict(M=30, T=1500),
+        "Exponential-Transform": dict(M=30, T=1500),
+        "Phase-Lagged-Oscillators": dict(M=30, T=2500, transients=1000),
     },
     "paper": {
-        "VAR(1)": dict(M=20, T=4000),
-        "OU-network": dict(M=20, T=4000),
-        "Kuramoto": dict(M=20, T=10000),
-        "Stuart-Landau": dict(M=20, T=10000),
-        "Lorenz-96": dict(M=20, T=20000),
-        "Rössler-coupled": dict(M=12, T=20000),
-        "OU-heavyTail": dict(M=20, T=4000),
-        "GBM-returns": dict(M=20, T=5000),
-        "TimeWarp-clones": dict(M=20, T=4000),
-        "CML-logistic": dict(M=30, T=8000),
+        # HPC/Cluster final: M=50 (1225 edges, optimal power), T=2000-4000 (sufficient)
+        # Designed for >1000 MTS (synthetic + real-world) on cluster
+        "VAR(1)": dict(M=50, T=2000),
+        "OU-network": dict(M=50, T=2000),
+        "Kuramoto": dict(M=50, T=4000, transients=2000),
+        "Stuart-Landau": dict(M=50, T=4000, transients=1500),
+        "Lorenz-96": dict(M=50, T=3000, transients=1000),
+        "Rössler-coupled": dict(M=40, T=4000, transients=2000),  # M=40 to keep runtime reasonable
+        "OU-heavyTail": dict(M=50, T=2000),
+        "GBM-returns": dict(M=50, T=2500),
+        "TimeWarp-clones": dict(M=50, T=2000),
+        "CML-logistic": dict(M=50, T=2000, transients=500),  # Maps scale well
+        "Cauchy-OU": dict(M=50, T=2000),
+        "Unidirectional-Cascade": dict(M=50, T=2000),
+        "Quadratic-Coupling": dict(M=50, T=2000),
+        "Exponential-Transform": dict(M=50, T=2000),
+        "Phase-Lagged-Oscillators": dict(M=50, T=3000),
     }
 }
 
@@ -228,6 +275,11 @@ def build_generators(profile: dict, only: list[str] | None = None) -> Dict[str, 
         "OU-heavyTail": lambda p=profile["OU-heavyTail"]: gen_ou_heavytail(**p),
         "GBM-returns": lambda p=profile["GBM-returns"]: gen_gbm_returns(**p),
         "TimeWarp-clones": lambda p=profile["TimeWarp-clones"]: gen_timewarp_clones(**p),
+        "Cauchy-OU": lambda p=profile["Cauchy-OU"]: gen_cauchy_ou(**p),
+        "Unidirectional-Cascade": lambda p=profile["Unidirectional-Cascade"]: gen_unidirectional_cascade(**p),
+        "Quadratic-Coupling": lambda p=profile["Quadratic-Coupling"]: gen_quadratic_coupling(**p),
+        "Exponential-Transform": lambda p=profile["Exponential-Transform"]: gen_exponential_transform(**p),
+        "Phase-Lagged-Oscillators": lambda p=profile["Phase-Lagged-Oscillators"]: gen_phase_lagged_oscillators(**p),
     }
     return {k: v for k, v in table.items() if (not only or k in only)}
 
@@ -400,7 +452,7 @@ def _model_already_computed(base_dir: str, model_name: str, M: int, T: int) -> t
 # ---------------------------- main --------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="Compute artifacts with pyspi (no plotting).")
-    ap.add_argument("--mode", choices=["dev", "dev+", "dev++", "paper"], default="dev", 
+    ap.add_argument("--mode", choices=["dev", "dev+", "dev++", "dev+++", "paper"], default="dev", 
                     help="Profile of M,T per model.")
     ap.add_argument("--config", default=None, help="Path to pilot0_config.yaml (auto-detected if not provided).")
     ap.add_argument("--subset", default="pilot0", help="pyspi subset name.")

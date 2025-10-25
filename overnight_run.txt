@@ -117,3 +117,25 @@ Write-Output "Will delete $($toDelete.Count) PNG files"
 
 # 3. DELETE them (only .png files directly in spi_space_individual\, not in subdirs)
 Get-ChildItem results\dev++\*\plots\spi_space_individual\*.png -File | Remove-Item -Verbose
+
+### cool command (what it doin):
+PS C:\Users\wille\OneDrive\Desktop\2025USYD\USYD\mts-spi-study> Get-Process python -ErrorAction SilentlyContinue | Select-Object Id, CPU,
+ StartTime, @{N='Runtime';E={(Get-Date) - $_.StartTime}}
+
+   Id         CPU StartTime             Runtime
+   --         --- ---------             -------
+ 2980           0 25/10/2025 3:17:25 PM 03:49:05.0204544
+ 5032     0.03125 23/10/2025 3:52:22 PM 2.03:14:07.9606819
+10364           0 17/10/2025 1:26:14 PM 8.05:40:16.1111681
+10944    0.296875 17/10/2025 1:26:13 PM 8.05:40:17.4626868
+19104     0.15625 25/10/2025 3:17:25 PM 03:49:05.2867212
+20432    8.546875 17/10/2025 1:26:15 PM 8.05:40:15.8785618
+23800 2041.015625 25/10/2025 6:31:08 PM 00:35:22.3804797
+30996   288.46875 23/10/2025 4:06:09 PM 2.03:00:21.6047710
+45796    0.015625 25/10/2025 6:31:08 PM 00:35:22.3959778
+46216    2.078125 25/10/2025 3:17:25 PM 03:49:04.9678094
+47688    0.015625 23/10/2025 4:06:09 PM 2.03:00:21.6638259
+52256  253.171875 23/10/2025 3:52:22 PM 2.03:14:07.9249576
+
+
+PS C:\Users\wille\OneDrive\Desktop\2025USYD\USYD\mts-spi-study> 

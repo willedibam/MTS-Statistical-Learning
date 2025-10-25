@@ -4,13 +4,14 @@ Visualization-only pipeline:
 - Reads artifacts from results/<profile>/<run_dir>/<model>/
 - No Calculator() calls; safe to iterate on plots
 """
-import os, argparse, numpy as np
+import os, argparse, glob, numpy as np
 from spimts.helpers.utils import ensure_dir, save_fig, load_numpy_or_none
 from spimts.helpers.plotting import (
     plot_mts_heatmap, plot_mpi_heatmap, plot_spi_space, plot_spi_space_individual,
     plot_spi_fingerprint, plot_spi_dendrogram
 )
 from spimts.helpers.selection import select_core_spis
+from spimts.helpers.logging_config import setup_logging
 
 def _parse_run_dir_name(name: str):
     """Split '<run_id>_<model_safe>' into (run_id, model_safe)."""
@@ -179,12 +180,17 @@ def main():
                    help="Comma-separated exact SPI names for subset visualization. Can be used multiple times for multiple subsets. Example: --spi-subset 'mi_kraskov_NN-4,SpearmanR,cov_EmpiricalCovariance'")
     p.add_argument("--run-id", default=None, help="Visualize a specific past run folder under results/<profile> matching <run_id>_<Model>.")
     p.add_argument("--all-runs", action="store_true", help="Process ALL matching runs (by profile/models) instead of only the latest per model.")
+    p.add_argument("--log-file", default=None, 
+                   help="Log to file: 'auto' (auto-named in ./logs/), explicit path, or omit for terminal-only output.")
 
     args = p.parse_args()
+    
+    # Setup logging
+    logger = setup_logging('visualize', args.profile, args.log_file)
 
     base = os.path.join(args.root, args.profile)
     if not os.path.isdir(base):
-        print(f"[ERR] No such results folder: {base}")
+        logger.error(f"No such results folder: {base}")
         return
 
     model_filters = [m.strip() for m in args.models.split(",") if m.strip()]
@@ -206,11 +212,17 @@ def main():
     )
 
     if not runs:
-        print("[INFO] No matching runs found. Check --profile / --models / --run-id.")
+        logger.warning("No matching runs found. Check --profile / --models / --run-id.")
         return
+    
+    logger.info(f"Found {len(runs)} model run(s) to visualize")
+    logger.info(f"Profile: {args.profile} | MPI heatmaps: {args.include_mpi_heatmaps}")
+    if spi_subsets:
+        logger.info(f"SPI subsets: {len(spi_subsets)} subset(s) requested")
+    logger.info("")  # Blank line for readability
 
-    for rid, model_safe, model_dir, _mtime in runs:
-        print(f"[VIZ] {model_safe}  (run_id={rid})")
+    for idx, (rid, model_safe, model_dir, _mtime) in enumerate(runs, 1):
+        logger.info(f"[{idx}/{len(runs)}] {model_safe} (run_id={rid})")
 
         plots_dir = ensure_dir(os.path.join(model_dir, "plots"))
         mpis_dir = ensure_dir(os.path.join(plots_dir, "mpis"))
@@ -221,18 +233,24 @@ def main():
 
         # Load ALL available SPIs first (no filter)
         X, all_matrices, all_offdiag, all_spi_names = _load_artifacts(model_dir, spi_filter=None)
+        logger.info(f"  Loaded {len(all_spi_names)} SPIs from cached artifacts")
         
         # MTS heatmap (always plot)
         if X is not None:
             ax = plot_mts_heatmap(X)
             save_fig(os.path.join(mts_dir, "mts_heatmap.png"), fig=ax.figure)
+            logger.info(f"  Saved MTS heatmap (T={X.shape[0]}, M={X.shape[1]})")
 
         # MPI heatmaps: controlled by --include-mpi-heatmaps
         mpi_spis_to_plot = _select_mpi_spis(all_spi_names, args.include_mpi_heatmaps)
-        for spi in mpi_spis_to_plot:
-            if spi in all_matrices:
-                ax = plot_mpi_heatmap(all_matrices[spi], spi, cbar=True)
-                save_fig(os.path.join(mpis_dir, f"mpi_{spi}.png"), fig=ax.figure)
+        if mpi_spis_to_plot:
+            for spi in mpi_spis_to_plot:
+                if spi in all_matrices:
+                    ax = plot_mpi_heatmap(all_matrices[spi], spi, cbar=True)
+                    save_fig(os.path.join(mpis_dir, f"mpi_{spi}.png"), fig=ax.figure)
+            logger.info(f"  Saved {len(mpi_spis_to_plot)} MPI heatmaps")
+        else:
+            logger.info(f"  Skipped MPI heatmaps (mode: {args.include_mpi_heatmaps})")
 
         # === FULL SPI-SPACE (all SPIs) ===
         CORE_SPIS = ["SpearmanR", "Covariance", "KendallTau", "MutualInfo", "TimeLaggedMutualInfo","TransferEntropy",
@@ -243,6 +261,7 @@ def main():
         
         if len(order) >= 2:
             # Generate plots for all three correlation methods
+            logger.info(f"  Generating SPI-space plots (grid + individual)...")
             for method in ["spearman", "kendall", "pearson"]:
                 plot_spi_space(all_matrices, order, method=method)
                 save_fig(os.path.join(spi_space_dir, f"spi_space_{method}.png"))
@@ -250,20 +269,24 @@ def main():
                 # Individual scatter plots for each SPI pair
                 method_dir = ensure_dir(os.path.join(spi_space_individual_dir, method))
                 plot_spi_space_individual(all_matrices, order, method_dir, method=method)
+            logger.info(f"  Saved 3 grid plots + {len(order)*(len(order)-1)//2} individual plots per method")
 
         # Fingerprints + dendrogram for all three methods (full SPI set)
         if len(all_offdiag) >= 2:
             fp_spis = list(all_offdiag.keys())
             if len(fp_spis) >= 2:
+                logger.info(f"  Generating fingerprints and dendrograms...")
                 for method in ["spearman", "kendall", "pearson"]:
                     plot_spi_fingerprint(all_offdiag, fp_spis, method=method)
                     save_fig(os.path.join(fingerprint_dir, f"fingerprint_{method}.png"))
                     plot_spi_dendrogram(all_offdiag, method=method, link="average")
                     save_fig(os.path.join(fingerprint_dir, f"dendrogram_{method}.png"))
+                logger.info(f"  Saved 3 fingerprints + 3 dendrograms")
         
         # === SPI SUBSETS (if requested) ===
         if spi_subsets:
             subsets_dir = ensure_dir(os.path.join(plots_dir, "subsets"))
+            logger.info(f"  Generating {len(spi_subsets)} SPI subset visualization(s)...")
             
             for subset in spi_subsets:
                 # Validate subset SPIs exist
@@ -296,8 +319,12 @@ def main():
                         save_fig(os.path.join(subset_fingerprint_dir, f"fingerprint_{method}.png"))
                         plot_spi_dendrogram(subset_offdiag, method=method, link="average")
                         save_fig(os.path.join(subset_fingerprint_dir, f"dendrogram_{method}.png"))
-                    
-                    print(f"      [SUBSET] {subset_name} ({len(validated_subset)} SPIs)")
+        
+        logger.info(f"  Completed visualization for {model_safe}")
+        logger.info("")  # Blank line between models
+    
+    logger.info("All visualizations complete!")
+
 
 if __name__ == "__main__":
     main()

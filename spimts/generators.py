@@ -186,3 +186,163 @@ def gen_timewarp_clones(M=10, T=2000, base_freq=0.03, warp_strength=0.15,
         tau = np.interp(t, knots, warped)
         X[:, m] = np.interp(tau, t, base) + rng.normal(0, noise, size=steps)
     return zscore(X[transients:], axis=0)
+
+# ===================== 10) Cauchy OU (Priority 1) ======================
+def gen_cauchy_ou(M=10, T=2000, dt=0.01, alpha=1.0, sigma=0.5, 
+                  transients=500, rng=None) -> np.ndarray:
+    """Ornstein-Uhlenbeck with Cauchy innovations (heavy tails).
+    
+    Purpose: Test {ρ,r} case study - Cauchy outliers distort Pearson r, not Spearman ρ.
+    Expected SPI-space: r↔ρ LOW correlation (r unreliable, ρ robust).
+    
+    Case Study: {SpearmanR, CrossCorr, KendallTau}
+    - All three are rank-based/robust → should ALL agree (HIGH inter-correlations)
+    - Contrasts with Pearson-like measures that fail under outliers
+    """
+    rng = rng or _rng_global
+    steps = transients + T
+    X = np.zeros((steps, M))
+    for t in range(1, steps):
+        # Cauchy innovations (Student-t with df=1, no finite variance)
+        dW = rng.standard_cauchy(size=M) * np.sqrt(dt)
+        X[t] = X[t-1] + (-alpha * X[t-1]) * dt + sigma * dW
+    return zscore(X[transients:], axis=0, nan_policy='omit')  # Handle potential infinities
+
+# ===================== 11) Unidirectional Cascade (Priority 1) =========
+def gen_unidirectional_cascade(M=10, T=2000, dt=0.01, alpha=0.5, 
+                                beta=0.8, sigma=0.3, transients=500, 
+                                rng=None) -> np.ndarray:
+    """Linear cascade X₁→X₂→X₃...→Xₙ with no reverse flow.
+    
+    Purpose: Test {TE,MI,TLMI} case study - TE captures direction, MI/TLMI don't.
+    Expected SPI-space: TE↔MI LOW, TE↔TLMI MEDIUM (TE asymmetric, MI symmetric).
+    
+    Case Study: {TransferEntropy, TimeLaggedMutualInfo, DirectedInfo}
+    - All directed SPIs, but TE most sensitive to pure unidirectional flow
+    - TE(X_i→X_{i+1}) >> TE(X_{i+1}→X_i) creates asymmetry MI can't capture
+    """
+    rng = rng or _rng_global
+    steps = transients + T
+    X = np.zeros((steps, M))
+    
+    for t in range(1, steps):
+        noise = rng.normal(0, sigma, size=M)
+        # First channel: autonomous OU process
+        X[t, 0] = X[t-1, 0] * (1 - alpha*dt) + noise[0] * np.sqrt(dt)
+        
+        # Cascade: each channel driven by previous channel only
+        for m in range(1, M):
+            # X_m ← -α·X_m + β·X_{m-1} + noise
+            X[t, m] = X[t-1, m] * (1 - alpha*dt) + beta * X[t-1, m-1] * dt + noise[m] * np.sqrt(dt)
+    
+    return zscore(X[transients:], axis=0)
+
+# ===================== 12) Quadratic Coupling (Priority 1) =============
+def gen_quadratic_coupling(M=10, T=2000, dt=0.01, alpha=0.5, 
+                           w_quad=0.3, sigma=0.2, transients=500, 
+                           rng=None) -> np.ndarray:
+    """Nonlinear non-monotonic coupling via quadratic terms.
+    
+    Purpose: Test {MI,ρ,r,dCorr} case study - MI captures nonlinearity, correlations don't.
+    Expected SPI-space: MI↔r LOW, MI↔ρ LOW, MI↔dCorr MEDIUM (MI high, correlations low).
+    
+    Case Study: {MutualInfo, DistanceCorrelation, HilbertSchmidtIndependenceCriterion}
+    - MI: captures all dependencies (linear + nonlinear)
+    - dCorr/HSIC: captures monotonic nonlinear dependencies
+    - Should form gradient: HSIC ≈ dCorr > Spearman > Pearson when nonlinearity present
+    
+    Dynamics: dX_i/dt = -α·X_i + Σ_j w·X_j² + noise
+    - Quadratic coupling creates non-monotonic relationships (parabolic)
+    - Pearson/Spearman low (no consistent direction), MI high (strong dependency)
+    """
+    rng = rng or _rng_global
+    steps = transients + T
+    X = np.zeros((steps, M))
+    X[0] = rng.normal(0, 0.1, size=M)
+    
+    # Ring-like quadratic coupling (each node coupled to k neighbors' squares)
+    k = 2  # couple to 2 neighbors on each side
+    for t in range(1, steps):
+        noise = rng.normal(0, sigma, size=M)
+        for m in range(M):
+            # Mean-field quadratic coupling
+            quad_sum = 0.0
+            for d in range(1, k+1):
+                quad_sum += X[t-1, (m+d) % M]**2 + X[t-1, (m-d) % M]**2
+            
+            drift = -alpha * X[t-1, m] + (w_quad / (2*k)) * quad_sum
+            X[t, m] = X[t-1, m] + drift * dt + noise[m] * np.sqrt(dt)
+    
+    return zscore(X[transients:], axis=0)
+
+# ===================== 13) Exponential Transform (Priority 2) ==========
+def gen_exponential_transform(M=10, T=2000, coupling=0.6, noise_std=0.15, 
+                              transients=200, rng=None) -> np.ndarray:
+    """Monotonic nonlinear coupling via exponential transform.
+    
+    Purpose: Test {ρ,dCorr,MI} gradient - all should detect monotonicity.
+    Expected SPI-space: ρ↔dCorr HIGH, ρ↔MI HIGH, dCorr↔MI HIGH (all monotonic-sensitive).
+    
+    Case Study: {SpearmanR, DistanceCorrelation, MutualInfo}
+    - Spearman: perfect for monotonic relationships
+    - dCorr: captures nonlinear monotonic dependencies
+    - MI: captures all dependencies
+    - All three should AGREE strongly (monotonic → rank-preserving → detectable by all)
+    
+    Dynamics: VAR on latent Z, observe Y = sign(Z)·exp(|Z|)
+    - Preserves ranks (monotonic transform)
+    - Breaks linearity (exponential curve)
+    - Tests whether SPIs detect "shape" vs "trend"
+    """
+    rng = rng or _rng_global
+    # Generate latent VAR(1)
+    A = np.eye(M) * 0.5 + (coupling/M) * (np.ones((M,M)) - np.eye(M))
+    steps = transients + T
+    Z = np.zeros((steps, M))
+    
+    for t in range(1, steps):
+        Z[t] = A @ Z[t-1] + rng.normal(0, noise_std, size=M)
+    
+    # Apply monotonic nonlinear transform
+    Y = np.sign(Z) * np.exp(np.abs(Z))
+    
+    return zscore(Y[transients:], axis=0)
+
+# ===================== 14) Phase-Lagged Oscillators (Priority 2) =======
+def gen_phase_lagged_oscillators(M=10, T=3000, dt=0.002, base_freq=0.1, 
+                                  coupling=0.8, phase_lag=np.pi/4, sigma=0.05,
+                                  transients=1000, rng=None) -> np.ndarray:
+    """Oscillators with systematic phase lags across channels.
+    
+    Purpose: Test {CrossCorr, CoherenceMag, ImaginaryCoherence} - phase vs amplitude.
+    Expected SPI-space: CrossCorr↔CoherenceMag MEDIUM, ImagCoherence isolated.
+    
+    Case Study: {CrossCorrelation, CoherenceMagnitude, ImaginaryCoherence}
+    - CrossCorr: detects lagged correlations (max over lags)
+    - CoherenceMag: frequency-domain amplitude coupling
+    - ImagCoherence: frequency-domain phase coupling (zero for in-phase, high for quadrature)
+    - Phase lags create: CrossCorr high (finds lag), CoherenceMag high (same freq), ImagCoh high (phase shift)
+    
+    Dynamics: Ring of oscillators, each π/4 ahead of previous
+    - Tests time-domain vs frequency-domain equivalence
+    - Imaginary coherence specifically sensitive to phase relationships
+    """
+    rng = rng or _rng_global
+    steps = transients + T
+    omega = 2 * np.pi * base_freq
+    
+    # Initialize phases with systematic lag
+    phi = np.array([m * phase_lag for m in range(M)])
+    
+    X = np.zeros((steps, M))
+    for t in range(steps):
+        # Each oscillator evolves independently but coupled via phase lag
+        X[t] = np.sin(omega * t * dt + phi) + rng.normal(0, sigma, size=M)
+        
+        # Add weak coupling to neighbors (maintains phase structure)
+        if t > 0:
+            for m in range(M):
+                neighbor_avg = 0.5 * (X[t, (m-1)%M] + X[t, (m+1)%M])
+                X[t, m] += coupling * dt * (neighbor_avg - X[t, m])
+    
+    return zscore(X[transients:], axis=0)
