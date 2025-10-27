@@ -13,13 +13,7 @@ import yaml
 from pyspi.calculator import Calculator
 
 # your generators module (copy your current generators.py here)
-from spimts.generators import (
-    gen_var, gen_ou_network, gen_kuramoto, gen_stuart_landau,
-    gen_lorenz96, gen_rossler_coupled, gen_cml_logistic,
-    gen_ou_heavytail, gen_gbm_returns, gen_timewarp_clones,
-    gen_cauchy_ou, gen_unidirectional_cascade, gen_quadratic_coupling,
-    gen_exponential_transform, gen_phase_lagged_oscillators
-)
+from spimts.generators import *
 
 # --------------------- profiles (dev vs paper) -------------------------
 PROFILES = {
@@ -40,6 +34,11 @@ PROFILES = {
         "Quadratic-Coupling": dict(M=4, T=500),
         "Exponential-Transform": dict(M=4, T=500),
         "Phase-Lagged-Oscillators": dict(M=4, T=500),
+        # Noise models (null hypotheses) - enabled via --include-noise flag
+        "Gaussian-Noise": dict(M=4, T=500),
+        "Cauchy-Noise": dict(M=4, T=500),
+        "t-Noise": dict(M=4, T=500),
+        "Exponential-Noise": dict(M=4, T=500),
     },
     "dev+": {
         # Medium testing: M=10 (45 edges), T=1000 (~10-15 min per model)
@@ -58,6 +57,11 @@ PROFILES = {
         "Quadratic-Coupling": dict(M=10, T=1000),
         "Exponential-Transform": dict(M=10, T=1000),
         "Phase-Lagged-Oscillators": dict(M=10, T=1500),
+        # Noise models (null hypotheses) - enabled via --include-noise flag
+        "Gaussian-Noise": dict(M=10, T=1000),
+        "Cauchy-Noise": dict(M=10, T=1000),
+        "t-Noise": dict(M=10, T=1000),
+        "Exponential-Noise": dict(M=10, T=1000),
     },
     "dev++": {
         # Validation: M=15 (105 edges), T=1000-2000 (~20-30 min per model)
@@ -76,6 +80,11 @@ PROFILES = {
         "Quadratic-Coupling": dict(M=15, T=1000),
         "Exponential-Transform": dict(M=15, T=1000),
         "Phase-Lagged-Oscillators": dict(M=15, T=2000),
+        # Noise models (null hypotheses) - enabled via --include-noise flag
+        "Gaussian-Noise": dict(M=15, T=1000),
+        "Cauchy-Noise": dict(M=15, T=1000),
+        "t-Noise": dict(M=15, T=1000),
+        "Exponential-Noise": dict(M=15, T=1000),
     },
     "dev+++": {
         # Overnight run: M=25-35 (300-595 edges), T=1500-2500 (~30-60 min per model)
@@ -86,7 +95,7 @@ PROFILES = {
         "Kuramoto": dict(M=30, T=2500, transients=2000),  # Phase locking needs longer
         "Stuart-Landau": dict(M=30, T=2500, transients=1500),  # Limit cycle convergence
         "Lorenz-96": dict(M=30, T=2000, transients=1000),  # Chaotic settling
-        "Rössler-coupled": dict(M=25, T=3000, transients=2000),  # Longer for coupled attractor
+        "Rössler-coupled": dict(M=30, T=2000, transients=2000),  # Longer for coupled attractor
         "OU-heavyTail": dict(M=30, T=1500),
         "GBM-returns": dict(M=30, T=2000),
         "TimeWarp-clones": dict(M=30, T=1500),
@@ -96,6 +105,11 @@ PROFILES = {
         "Quadratic-Coupling": dict(M=30, T=1500),
         "Exponential-Transform": dict(M=30, T=1500),
         "Phase-Lagged-Oscillators": dict(M=30, T=2500, transients=1000),
+        # Noise models (null hypotheses) - enabled via --include-noise flag
+        "Gaussian-Noise": dict(M=30, T=1500),
+        "Cauchy-Noise": dict(M=30, T=1500),
+        "t-Noise": dict(M=30, T=1500),
+        "Exponential-Noise": dict(M=30, T=1500),
     },
     "paper": {
         # HPC/Cluster final: M=50 (1225 edges, optimal power), T=2000-4000 (sufficient)
@@ -115,6 +129,11 @@ PROFILES = {
         "Quadratic-Coupling": dict(M=50, T=2000),
         "Exponential-Transform": dict(M=50, T=2000),
         "Phase-Lagged-Oscillators": dict(M=50, T=3000),
+        # Noise models (null hypotheses) - enabled via --include-noise flag
+        "Gaussian-Noise": dict(M=50, T=2000),
+        "Cauchy-Noise": dict(M=50, T=2000),
+        "t-Noise": dict(M=50, T=2000),
+        "Exponential-Noise": dict(M=50, T=2000),
     }
 }
 
@@ -263,7 +282,17 @@ def extract_spis(calc: Calculator) -> List[str]:
         return list(pd.unique([c[0] if isinstance(c, tuple) else c for c in cols]))
 
 # ----------------------- generator wiring -------------------------------
-def build_generators(profile: dict, only: list[str] | None = None) -> Dict[str, Callable[[], np.ndarray]]:
+def build_generators(profile: dict, only: list[str] | None = None, include_noise: bool = False) -> Dict[str, Callable[[], np.ndarray]]:
+    """Build generator functions from profile.
+    
+    Args:
+        profile: Dictionary of model_name -> parameters
+        only: Optional list of model names to filter to
+        include_noise: If True, include noise models (Gaussian-Noise, etc.). Default False.
+    
+    Returns:
+        Dictionary of model_name -> generator function
+    """
     table = {
         "VAR(1)": lambda p=profile["VAR(1)"]: gen_var(**p),
         "OU-network": lambda p=profile["OU-network"]: gen_ou_network(**p),
@@ -281,6 +310,17 @@ def build_generators(profile: dict, only: list[str] | None = None) -> Dict[str, 
         "Exponential-Transform": lambda p=profile["Exponential-Transform"]: gen_exponential_transform(**p),
         "Phase-Lagged-Oscillators": lambda p=profile["Phase-Lagged-Oscillators"]: gen_phase_lagged_oscillators(**p),
     }
+    
+    # Add noise models if requested
+    if include_noise:
+        noise_models = {
+            "Gaussian-Noise": lambda p=profile.get("Gaussian-Noise", {}): gen_gaussian_noise(**p),
+            "Cauchy-Noise": lambda p=profile.get("Cauchy-Noise", {}): gen_cauchy_noise(**p),
+            "t-Noise": lambda p=profile.get("t-Noise", {}): gen_t_noise(**p),
+            "Exponential-Noise": lambda p=profile.get("Exponential-Noise", {}): gen_exponential_noise(**p),
+        }
+        table.update(noise_models)
+    
     return {k: v for k, v in table.items() if (not only or k in only)}
 
 # ----------------------- caching helpers --------------------------------
@@ -464,11 +504,13 @@ def main():
                     help="Skip models that already have computed results.")
     ap.add_argument("--dry-run", action="store_true", 
                     help="Show what would be computed without actually running.")
+    ap.add_argument("--exclude-noise", action="store_true",
+                    help="Exclude noise models (Gaussian-Noise, Cauchy-Noise, t-Noise, Exponential-Noise) from computation. Default: noise included.")
     args = ap.parse_args()
 
     profile = PROFILES[args.mode]
     only = [m.strip() for m in args.models.split(",") if m.strip()] or None
-    generators = build_generators(profile, only=only)
+    generators = build_generators(profile, only=only, include_noise=not args.exclude_noise)
 
     configfile = _get_config_path(args.config)
     labels_map = _load_labels(configfile)

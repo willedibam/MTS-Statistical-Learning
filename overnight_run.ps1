@@ -145,7 +145,7 @@ foreach ($gen in $generators) {
     
     # Run computation
     try {
-        python -m spimts compute --mode dev+++ --subset pilot0 --models "$gen" --outdir results/dev+++ --cache cache --normalise 1 2>&1 | Tee-Object -FilePath $logFile -Append
+        python -m spimts compute --mode dev+++ --subset pilot0 --models "$gen" --outdir results --include-noise --cache cache --normalise 1 --skip-existing 2>&1 | Tee-Object -FilePath $logFile -Append
         
         if ($LASTEXITCODE -eq 0) {
             $modelEndTime = Get-Date

@@ -171,7 +171,7 @@ def _select_mpi_spis(all_spis: list[str], mode: str) -> list[str]:
 
 def main():
     p = argparse.ArgumentParser(description="Visualization-only: read artifacts and plot.")
-    p.add_argument("--profile", choices=["dev","dev+","dev++","paper"], default="dev")
+    p.add_argument("--profile", choices=["dev","dev+","dev++","dev+++","paper"], default="dev")
     p.add_argument("--root", default="./results", help="Results root (contains dev/ and paper/).")
     p.add_argument("--models", default="", help="Comma-separated filter for model folder names (substr match).")
     p.add_argument("--include-mpi-heatmaps", default="core", 

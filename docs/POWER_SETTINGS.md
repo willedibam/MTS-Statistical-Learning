@@ -97,7 +97,10 @@ Or use Windows Settings GUI to restore your preferred sleep timeout.
 
 ### 1. Laptop Users
 - **Plug in AC adapter** before starting (don't run on battery)
-- **Close laptop lid settings**: Set "When I close the lid" → "Do nothing" (Settings → System → Power & sleep → Additional power settings → Choose what closing the lid does)
+- **CRITICAL: Close laptop lid settings**: Set "When I close the lid" → **"Do nothing"** (Settings → System → Power & sleep → Additional power settings → Choose what closing the lid does)
+  - ⚠️ **This is the #1 cause of unexpected sleep** - even with AC standby disabled, closing the lid will sleep the computer
+  - **Verify this setting for both "Plugged in" AND "On battery"**
+- **Alternative**: Keep laptop lid OPEN during overnight run (prop up with books if needed)
 
 ### 2. Desktop Users
 - Ensure **no scheduled maintenance** or Windows Update restarts during run (Settings → Update & Security → Windows Update → Advanced options → "Pause updates")

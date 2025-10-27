@@ -276,7 +276,7 @@ def gen_quadratic_coupling(M=10, T=2000, dt=0.01, alpha=0.5,
     return zscore(X[transients:], axis=0)
 
 # ===================== 13) Exponential Transform (Priority 2) ==========
-def gen_exponential_transform(M=10, T=2000, coupling=0.6, noise_std=0.15, 
+def gen_exponential_transform(M=10, T=2000, coupling=0.8, noise_std=0.15, 
                               transients=200, rng=None) -> np.ndarray:
     """Monotonic nonlinear coupling via exponential transform.
     
@@ -295,8 +295,16 @@ def gen_exponential_transform(M=10, T=2000, coupling=0.6, noise_std=0.15,
     - Tests whether SPIs detect "shape" vs "trend"
     """
     rng = rng or _rng_global
-    # Generate latent VAR(1)
-    A = np.eye(M) * 0.5 + (coupling/M) * (np.ones((M,M)) - np.eye(M))
+    # Generate latent VAR(1) - ensure stability with smaller coupling
+    phi = 0.5  # Diagonal decay
+    A = np.eye(M) * phi + (coupling/M) * (np.ones((M,M)) - np.eye(M))
+    
+    # Force stability: scale to spectral radius < 0.95
+    ev = np.linalg.eigvals(A)
+    sr = np.max(np.abs(ev))
+    if sr >= 0.95:
+        A = A * (0.9 / sr)
+    
     steps = transients + T
     Z = np.zeros((steps, M))
     
@@ -304,7 +312,9 @@ def gen_exponential_transform(M=10, T=2000, coupling=0.6, noise_std=0.15,
         Z[t] = A @ Z[t-1] + rng.normal(0, noise_std, size=M)
     
     # Apply monotonic nonlinear transform
-    Y = np.sign(Z) * np.exp(np.abs(Z))
+    # Use tanh-scaled exponential to prevent overflow while keeping monotonicity
+    # Y = sign(Z) * (exp(|Z|/3) - 1) gives good dynamic range without explosion
+    Y = np.sign(Z) * (np.exp(np.abs(Z) / 3.0) - 1.0)
     
     return zscore(Y[transients:], axis=0)
 
@@ -346,3 +356,83 @@ def gen_phase_lagged_oscillators(M=10, T=3000, dt=0.002, base_freq=0.1,
                 X[t, m] += coupling * dt * (neighbor_avg - X[t, m])
     
     return zscore(X[transients:], axis=0)
+
+
+# ===================== 15-18) NOISE MODELS (Null Hypotheses) ===========
+# Purpose: Baseline controls for clustering/classification
+# - Pure noise (no structure) should show ALL SPIs uncorrelated
+# - Tests robustness of moment-based vs rank-based vs information SPIs
+
+def gen_gaussian_noise(M=10, T=2000, rng=None) -> np.ndarray:
+    """Pure IID Gaussian noise - no dependencies, no structure.
+    
+    Purpose: NULL HYPOTHESIS for all SPIs. Gold standard baseline.
+    Expected SPI-space: All SPI-SPI correlations ≈ 0 (diagonal fingerprint).
+    
+    Classification value: If classifier can't distinguish this from structured data, it's broken.
+    Clustering value: Should form its own cluster (outlier from all dynamical models).
+    
+    Dynamics: X_t ~ N(0, 1), IID across time and channels.
+    """
+    rng = rng or _rng_global
+    return rng.normal(0, 1, size=(T, M))
+
+
+def gen_cauchy_noise(M=10, T=2000, rng=None) -> np.ndarray:
+    """Pure IID Cauchy noise - infinite variance, heavy tails.
+    
+    Purpose: Test robustness of moment-based SPIs (cov, pearson) vs rank/info SPIs.
+    Expected SPI-space: 
+    - Covariance/Pearson: FAILS (undefined variance) → random values
+    - Spearman/Kendall: ~0 (rank-based, robust)
+    - MI: ~0 (independent channels)
+    - Distance (DTW, dCor): random fluctuations
+    
+    Case Study: {Covariance, SpearmanR, MI_kraskov}
+    - Cov: unstable (infinite variance)
+    - Spearman: stable ~0 (no dependency)
+    - MI: stable ~0 (independent)
+    → Expect ρ(Spearman, MI) >> ρ(Cov, Spearman) ≈ ρ(Cov, MI) (Cov is noise)
+    
+    Dynamics: X_t ~ Cauchy(0, 1), IID.
+    """
+    rng = rng or _rng_global
+    return rng.standard_cauchy(size=(T, M))
+
+
+def gen_t_noise(M=10, T=2000, df=3.0, rng=None) -> np.ndarray:
+    """Pure IID Student-t noise - tunable tail heaviness.
+    
+    Purpose: Intermediate between Gaussian (df→∞) and Cauchy (df=1).
+    - df > 2: finite variance, heavy tails
+    - df ≤ 2: infinite variance
+    
+    Expected SPI-space:
+    - For df=3: Cov/Pearson degraded (outliers), Spearman/MI robust
+    - For df=10: Similar to Gaussian (tails less extreme)
+    
+    Case Study: Compare df=3 vs df=10 to see tail-heaviness effect on SPI concordance.
+    
+    Dynamics: X_t ~ t(df), IID. Default df=3 (finite mean, finite variance, heavy tails).
+    """
+    rng = rng or _rng_global
+    return rng.standard_t(df, size=(T, M))
+
+
+def gen_exponential_noise(M=10, T=2000, rate=1.0, rng=None) -> np.ndarray:
+    """Pure IID Exponential noise - positive support, right-skewed.
+    
+    Purpose: Test asymmetry/skewness sensitivity.
+    - Gaussian-based SPIs (Pearson, MI_gaussian): may underperform
+    - Rank-based (Spearman, Kendall): robust to skewness
+    - Nonparametric MI (Kraskov): robust
+    
+    Expected SPI-space:
+    - MI_gaussian vs MI_kraskov: moderate divergence (Gaussian assumption violated)
+    - Spearman/Kendall: ~0 (no dependency)
+    - Cov: ~0 (IID)
+    
+    Dynamics: X_t ~ Exp(rate), IID. Z-scored to make comparable to other generators.
+    """
+    rng = rng or _rng_global
+    return zscore(rng.exponential(1/rate, size=(T, M)), axis=0)

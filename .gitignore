@@ -22,5 +22,12 @@ cache/
 .DS_Store
 Thumbs.db
 
-# markdowns
-CONTEXT.mdFUTURE.md
+# markdowns and notebooks
+playing.ipynb
+jupyter/
+
+# logs
+logs/
+
+# PowerShell scripts
+*.ps1

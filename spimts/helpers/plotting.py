@@ -7,7 +7,42 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import pearsonr, spearmanr, kendalltau
 from scipy.cluster.hierarchy import linkage, dendrogram
+from scipy.stats import gaussian_kde
 from .utils import save_fig
+
+# ========== COLOR SCHEME CONFIGURATION ==========
+# Uncomment ONE color scheme to use for SPI-space plots
+
+# Option 1: MONOCHROMATIC (grays + teal accent)
+# COLOR_SCHEME = "monochrome"
+# SCATTER_COLOR = "#4A5568"      # Charcoal gray
+# SCATTER_ALPHA = 0.6
+# LINE_COLOR = "#0F766E"          # Deep teal
+# LINE_ALPHA = 0.85
+# MARGINAL_COLOR = "#4A5568"      # Match scatter
+# MARGINAL_ALPHA = 0.5
+# KDE_COLOR = "#2D3748"           # Darker gray
+
+# Option 2: DUOTONE (navy + amber)
+COLOR_SCHEME = "duotone"
+SCATTER_COLOR = "#1E3A8A"       # Navy blue
+SCATTER_ALPHA = 0.6
+LINE_COLOR = "#F59E0B"          # Amber
+LINE_ALPHA = 0.85
+MARGINAL_COLOR = "#1E3A8A"      # Match scatter
+MARGINAL_ALPHA = 0.5
+KDE_COLOR = "#1E40AF"           # Darker navy
+
+# # # Option 3: ROYAL BLUE custom (with matching red/purple)
+# COLOR_SCHEME = "royal"
+# SCATTER_COLOR = "#090088"       # Royal blue
+# SCATTER_ALPHA = 0.6
+# LINE_COLOR = "#880000"          # Deep red (matched to blue)
+# LINE_ALPHA = 0.85
+# MARGINAL_COLOR = "#090088"      # Match scatter
+# MARGINAL_ALPHA = 0.5
+# KDE_COLOR = "#5D3FD3"           # Purple
+# # Alternative: Use LINE_COLOR = "#5D3FD3" for purple trendline
 
 # ---------- MTS heatmap ----------
 def plot_mts_heatmap(data: np.ndarray, vmin: float = -2, vmax: float = 2, ax=None):
@@ -74,7 +109,7 @@ def plot_mpi_heatmap(matrix: np.ndarray, spi: str, cbar: bool = False, ax=None):
                 max_abs = max(abs(vmin - center), abs(vmax - center))
                 vmin, vmax = center - max_abs, center + max_abs
     
-    sns.heatmap(matrix, vmin=vmin, vmax=vmax, center=center, cmap="icefire",
+    sns.heatmap(matrix, vmin=vmin, vmax=vmax, center=center, cmap="gray", #icefire
                 annot=False, square=True, xticklabels=False, yticklabels=False,
                 cbar=cbar, cbar_kws={"shrink": .8}, linewidths=.4, ax=ax)
     ax.set_title(f"{spi}")
@@ -99,7 +134,19 @@ def _score_pair(x, y, method: str):
         return kendalltau(x, y)[0]
     raise ValueError("method must be one of: pearson|spearman|kendall")
 
-def plot_spi_space(matrices: Dict[str, np.ndarray], spi_names: List[str], method: str = "spearman"):
+def plot_spi_space(matrices: Dict[str, np.ndarray], spi_names: List[str], method: str = "spearman", marginals: bool = False):
+    """Plot SPI-space grid with all pairwise comparisons.
+    
+    Args:
+        matrices: Dict of SPI name -> MPI matrix (2D array)
+        spi_names: List of SPI names to include
+        method: Correlation method ('spearman', 'pearson', or 'kendall')
+        marginals: If True, add marginal distributions on grid edges. Default: False.
+                  WARNING: Marginals on large grids (>5 SPIs) may be hard to read.
+    
+    Note: Issue with non-square subplots comes from using (n-1, n-1) subplots
+    but plotting different aspect ratios. Fixing by ensuring square aspect.
+    """
     # vectorise off-diagonals
     off = {k: _offdiag(matrices[k]) for k in spi_names if k in matrices}
     names = list(off.keys())
@@ -107,12 +154,50 @@ def plot_spi_space(matrices: Dict[str, np.ndarray], spi_names: List[str], method
     if n < 2:
         print("[WARN] Need ≥2 SPIs for SPI-space; skipping.")
         return
+    
+    # Map method to Greek symbol
+    corr_symbols = {"spearman": r"$\rho$", "pearson": r"$r$", "kendall": r"$\tau$"}
+    symbol = corr_symbols.get(method, method)
+    
     n_rows, n_cols = n-1, n-1
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.5*n_cols, 2.5*n_rows), dpi=180)
-    if n_rows == 1 and n_cols == 1:
-        axes = np.array([[axes]])
-    elif n_rows == 1 or n_cols == 1:
-        axes = axes.reshape(n_rows, n_cols)
+    
+    if marginals:
+        # Use GridSpec to add space for marginals
+        from matplotlib.gridspec import GridSpec
+        
+        # Create figure with extra space for marginals
+        fig = plt.figure(figsize=(4*n_cols + 2, 4*n_rows + 2), dpi=180)
+        
+        # Create grid: main plot area + top/right marginals
+        gs = GridSpec(n_rows + 1, n_cols + 1, figure=fig,
+                     width_ratios=[4]*n_cols + [1],
+                     height_ratios=[1] + [4]*n_rows,
+                     hspace=0.05, wspace=0.05)
+        
+        # Create main subplot axes
+        axes = np.empty((n_rows, n_cols), dtype=object)
+        for i in range(n_rows):
+            for j in range(n_cols):
+                axes[i, j] = fig.add_subplot(gs[i+1, j])
+        
+        # Create marginal axes
+        marginal_top = [fig.add_subplot(gs[0, j]) for j in range(n_cols)]
+        marginal_right = [fig.add_subplot(gs[i+1, n_cols]) for i in range(n_rows)]
+        
+    else:
+        # Use square figsize per subplot to avoid rectangular distortion
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows), dpi=180)
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([[axes]])
+        elif n_rows == 1 or n_cols == 1:
+            axes = axes.reshape(n_rows, n_cols)
+        marginal_top = None
+        marginal_right = None
+    
+    # Track data for marginals (if enabled)
+    col_data = {j: [] for j in range(n_cols)}  # x-axis data per column
+    row_data = {i: [] for i in range(n_rows)}  # y-axis data per row
+    
     for i in range(n_rows):
         for j in range(n_cols):
             ax = axes[i, j]
@@ -122,35 +207,71 @@ def plot_spi_space(matrices: Dict[str, np.ndarray], spi_names: List[str], method
                 ok = (np.all(np.isfinite(x)) and np.all(np.isfinite(y))
                       and np.std(x) > 0 and np.std(y) > 0)
                 r = _score_pair(x, y, method) if ok else np.nan
-                # Gray dots, larger size, medium transparency
-                ax.scatter(x, y, alpha=0.7, s=12, marker='.', color='gray')
                 
-                # Color-coded regression line based on correlation strength
+                # Track data for marginals
+                if marginals and ok:
+                    col_data[j].extend(x)
+                    row_data[i].extend(y)
+                
+                # Scatter with configured colors
+                ax.scatter(x, y, alpha=SCATTER_ALPHA, s=12, marker='.', color=SCATTER_COLOR)
+                
+                # Polyfit line (NOT regression, just best-fit trend)
                 if ok:
                     try:
-                        # RdYlBu_r: Red(+1) -> Yellow(0) -> Blue(-1), avoids white at zero
-                        cmap = plt.cm.RdYlBu_r
-                        norm_r = (r + 1) / 2  # Map [-1, 1] to [0, 1]
-                        line_color = cmap(norm_r)
-                        
                         z = np.polyfit(x, y, 1)
-                        ax.plot(x, np.poly1d(z)(x), color=line_color, linestyle='--', 
-                               alpha=0.8, linewidth=1.5)
+                        ax.plot(x, np.poly1d(z)(x), color=LINE_COLOR, linestyle='--', 
+                               alpha=LINE_ALPHA, linewidth=1.5)
                     except Exception:
                         pass
                 
-                ax.set_xlabel(a); ax.set_ylabel(b); ax.set_title(f"{method}: {r:.2f}" if np.isfinite(r) else f"{method}: nan")
-                # Let matplotlib auto-scale axes (no forced aspect ratio)
+                # Title shows correlation coefficient with Greek symbol
+                ax.set_xlabel(a, fontsize=9)
+                ax.set_ylabel(b, fontsize=9)
+                ax.set_title(f"{symbol} = {r:.2f}" if np.isfinite(r) else f"{symbol} = nan", fontsize=10)
+                
+                if not marginals:
+                    ax.set_aspect('equal', adjustable='datalim')  # Force square aspect (only if no marginals)
+                ax.grid(True, alpha=0.2)
             else:
                 ax.set_visible(False)
+    
+    # Add marginals if requested
+    if marginals and marginal_top is not None and marginal_right is not None:
+        # Top marginals (x-axis distributions per column)
+        for j in range(n_cols):
+            if col_data[j]:
+                data = np.array(col_data[j])
+                marginal_top[j].hist(data, bins=30, color=MARGINAL_COLOR, alpha=MARGINAL_ALPHA, edgecolor='none')
+                marginal_top[j].set_xticks([])
+                marginal_top[j].set_yticks([])
+                marginal_top[j].spines['top'].set_visible(False)
+                marginal_top[j].spines['right'].set_visible(False)
+                marginal_top[j].spines['left'].set_visible(False)
+            else:
+                marginal_top[j].set_visible(False)
+        
+        # Right marginals (y-axis distributions per row)
+        for i in range(n_rows):
+            if row_data[i]:
+                data = np.array(row_data[i])
+                marginal_right[i].hist(data, bins=30, color=MARGINAL_COLOR, alpha=MARGINAL_ALPHA, 
+                                      edgecolor='none', orientation='horizontal')
+                marginal_right[i].set_xticks([])
+                marginal_right[i].set_yticks([])
+                marginal_right[i].spines['top'].set_visible(False)
+                marginal_right[i].spines['right'].set_visible(False)
+                marginal_right[i].spines['bottom'].set_visible(False)
+            else:
+                marginal_right[i].set_visible(False)
+    
     plt.tight_layout()
 
 def plot_spi_space_individual(matrices: Dict[str, np.ndarray], spi_names: List[str], 
                                output_dir: str, method: str = "spearman"):
-    """Plot individual scatter plots for all pairwise SPI comparisons.
+    """Plot individual scatter plots for all pairwise SPI comparisons WITH MARGINALS.
     
-    Creates n(n-1)/2 individual figures, one per SPI pair, saved to output_dir.
-    This is useful for large datasets where the full SPI-space grid is too large to view.
+    Creates n(n-1)/2 individual figures with marginal distributions, one per SPI pair.
     
     Args:
         matrices: Dict of SPI name -> MPI matrix (2D array)
@@ -185,27 +306,64 @@ def plot_spi_space_individual(matrices: Dict[str, np.ndarray], spi_names: List[s
                   and np.std(x) > 0 and np.std(y) > 0)
             r = _score_pair(x, y, method) if ok else np.nan
             
-            # Create individual SQUARE figure
-            fig, ax = plt.subplots(figsize=(6, 6), dpi=150)
-            # Gray dots, larger size, medium transparency
-            ax.scatter(x, y, alpha=0.7, s=15, marker='o', color='gray')
+            # Create joint plot with marginals using seaborn
+            g = sns.JointGrid(x=x, y=y, height=7, ratio=5, space=0.15)
             
-            # Add regression line in soft teal #4ECDC4/ purple #B19CD9/coral #FA8072 (single pastel color)
+            # Main scatter plot
+            g.ax_joint.scatter(x, y, alpha=SCATTER_ALPHA, s=20, marker='o', color=SCATTER_COLOR)
+            
+            # Add polyfit line (NOT regression - just trend)
             if ok:
                 try:
                     z = np.polyfit(x, y, 1)
-                    ax.plot(x, np.poly1d(z)(x), color='#4ECDC4', linestyle='--', 
-                           alpha=0.85, linewidth=2.5)
+                    x_sorted = np.sort(x)
+                    g.ax_joint.plot(x_sorted, np.poly1d(z)(x_sorted), color=LINE_COLOR, 
+                                   linestyle='--', alpha=LINE_ALPHA, linewidth=2.5)
                 except Exception:
                     pass
             
-            ax.set_xlabel(a, fontsize=12)
-            ax.set_ylabel(b, fontsize=12)
-            # Title shows only correlation value with appropriate symbol
-            ax.set_title(f"{symbol} = {r:.3f}" if np.isfinite(r) else f"{symbol} = nan", fontsize=13)
-            ax.set_aspect('equal', adjustable='datalim')  # Square aspect, flexible limits
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
+            # Marginal histograms with KDE overlay
+            g.ax_marg_x.hist(x, bins=30, color=MARGINAL_COLOR, alpha=MARGINAL_ALPHA, edgecolor='none')
+            g.ax_marg_y.hist(y, bins=30, color=MARGINAL_COLOR, alpha=MARGINAL_ALPHA, 
+                            edgecolor='none', orientation='horizontal')
+            
+            # Add KDE overlays on marginals (smooth trend line)
+            if ok:
+                try:
+                    # X marginal KDE
+                    kde_x = gaussian_kde(x)
+                    x_range = np.linspace(x.min(), x.max(), 200)
+                    kde_x_vals = kde_x(x_range)
+                    # Scale KDE to match histogram height
+                    hist_x, _ = np.histogram(x, bins=30)
+                    scale_x = hist_x.max() / kde_x_vals.max() if kde_x_vals.max() > 0 else 1
+                    ax2_x = g.ax_marg_x.twinx()
+                    ax2_x.plot(x_range, kde_x_vals * scale_x, color=KDE_COLOR, 
+                              linewidth=2.5, alpha=0.9)
+                    ax2_x.set_ylim(0, hist_x.max() * 1.1)
+                    ax2_x.axis('off')
+                    
+                    # Y marginal KDE
+                    kde_y = gaussian_kde(y)
+                    y_range = np.linspace(y.min(), y.max(), 200)
+                    kde_y_vals = kde_y(y_range)
+                    hist_y, _ = np.histogram(y, bins=30)
+                    scale_y = hist_y.max() / kde_y_vals.max() if kde_y_vals.max() > 0 else 1
+                    ax2_y = g.ax_marg_y.twiny()
+                    ax2_y.plot(kde_y_vals * scale_y, y_range, color=KDE_COLOR, 
+                              linewidth=2.5, alpha=0.9)
+                    ax2_y.set_xlim(0, hist_y.max() * 1.1)
+                    ax2_y.axis('off')
+                except Exception as e:
+                    # KDE might fail for some data distributions
+                    pass
+            
+            # Labels and title
+            g.ax_joint.set_xlabel(a, fontsize=12)
+            g.ax_joint.set_ylabel(b, fontsize=12)
+            g.fig.suptitle(f"{symbol} = {r:.3f}" if np.isfinite(r) else f"{symbol} = nan", 
+                          fontsize=14, y=0.98)
+            g.ax_joint.grid(True, alpha=0.3)
             
             # Save figure
             safe_a = a.replace("/", "-").replace("\\", "-").replace(" ", "_")
@@ -214,12 +372,12 @@ def plot_spi_space_individual(matrices: Dict[str, np.ndarray], spi_names: List[s
             filepath = os.path.join(output_dir, filename)
             
             try:
-                save_fig(filepath, fig=fig)
+                save_fig(filepath, fig=g.fig)
                 plot_count += 1
             except Exception as e:
                 print(f"[WARN] Failed to save {filename}: {e}")
             finally:
-                plt.close(fig)
+                plt.close(g.fig)
     
     print(f"[INFO] Created {plot_count} individual SPI-space plots in {output_dir}")
     return plot_count
