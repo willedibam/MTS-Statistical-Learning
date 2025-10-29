@@ -23,26 +23,27 @@ from .utils import save_fig
 # MARGINAL_ALPHA = 0.5
 # KDE_COLOR = "#2D3748"           # Darker gray
 
-# Option 2: DUOTONE (navy + amber)
-COLOR_SCHEME = "duotone"
-SCATTER_COLOR = "#1E3A8A"       # Navy blue
-SCATTER_ALPHA = 0.6
-LINE_COLOR = "#F59E0B"          # Amber
-LINE_ALPHA = 0.85
-MARGINAL_COLOR = "#1E3A8A"      # Match scatter
-MARGINAL_ALPHA = 0.5
-KDE_COLOR = "#1E40AF"           # Darker navy
-
-# # # Option 3: ROYAL BLUE custom (with matching red/purple)
-# COLOR_SCHEME = "royal"
-# SCATTER_COLOR = "#090088"       # Royal blue
+# # Option 2: DUOTONE (navy + amber)
+# COLOR_SCHEME = "duotone"
+# SCATTER_COLOR = "#1E3A8A"       # Navy blue
 # SCATTER_ALPHA = 0.6
-# LINE_COLOR = "#880000"          # Deep red (matched to blue)
+# LINE_COLOR = "#F59E0B"          # Amber
 # LINE_ALPHA = 0.85
-# MARGINAL_COLOR = "#090088"      # Match scatter
+# MARGINAL_COLOR = "#1E3A8A"      # Match scatter
 # MARGINAL_ALPHA = 0.5
-# KDE_COLOR = "#5D3FD3"           # Purple
-# # Alternative: Use LINE_COLOR = "#5D3FD3" for purple trendline
+# KDE_COLOR = "#1E40AF"           # Darker navy
+
+# # Option 3: ROYAL BLUE custom (with matching red/purple)
+COLOR_SCHEME = "royal"
+SCATTER_COLOR = "#090088"       # Royal blue
+SCATTER_ALPHA = 0.6
+LINE_COLOR = "#880000"          # Deep red (matched to blue)
+LINE_ALPHA = 0.85
+MARGINAL_COLOR = "#090088"      # Match scatter
+MARGINAL_ALPHA = 0.5
+KDE_COLOR = "#5D3FD3"           # Purple
+# Alternative: Use LINE_COLOR = "#5D3FD3" for purple trendline
+
 
 # ---------- MTS heatmap ----------
 def plot_mts_heatmap(data: np.ndarray, vmin: float = -2, vmax: float = 2, ax=None):
@@ -109,7 +110,7 @@ def plot_mpi_heatmap(matrix: np.ndarray, spi: str, cbar: bool = False, ax=None):
                 max_abs = max(abs(vmin - center), abs(vmax - center))
                 vmin, vmax = center - max_abs, center + max_abs
     
-    sns.heatmap(matrix, vmin=vmin, vmax=vmax, center=center, cmap="gray", #icefire
+    sns.heatmap(matrix, vmin=vmin, vmax=vmax, center=center, cmap="icefire", #icefire
                 annot=False, square=True, xticklabels=False, yticklabels=False,
                 cbar=cbar, cbar_kws={"shrink": .8}, linewidths=.4, ax=ax)
     ax.set_title(f"{spi}")
@@ -213,15 +214,15 @@ def plot_spi_space(matrices: Dict[str, np.ndarray], spi_names: List[str], method
                     col_data[j].extend(x)
                     row_data[i].extend(y)
                 
-                # Scatter with configured colors
+                # Scatter with configured colors #s=12
                 ax.scatter(x, y, alpha=SCATTER_ALPHA, s=12, marker='.', color=SCATTER_COLOR)
                 
                 # Polyfit line (NOT regression, just best-fit trend)
                 if ok:
                     try:
                         z = np.polyfit(x, y, 1)
-                        ax.plot(x, np.poly1d(z)(x), color=LINE_COLOR, linestyle='--', 
-                               alpha=LINE_ALPHA, linewidth=1.5)
+                        ax.plot(x, np.poly1d(z)(x), color=LINE_COLOR, linestyle='solid', 
+                               alpha=LINE_ALPHA, linewidth=1.5) #w=1.5
                     except Exception:
                         pass
                 
