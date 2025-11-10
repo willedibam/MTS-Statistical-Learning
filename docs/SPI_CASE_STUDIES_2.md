@@ -20,7 +20,7 @@ The central idea here is simple and useful: **the relationships between statisti
 
 **Hierarchy.** Linear ⇒ monotone ⇒ statistically dependent; converses need not hold.
 
-**Gaussian exemplar.** For bivariate normal pairs, (I(X;Y) = -\tfrac12\log(1-r^2)) is a strictly increasing function of (|r|). Under elliptical/normal settings, Spearman’s (\rho) is a monotone transform of (r). Consequently:
+**Gaussian exemplar.** For bivariate normal pairs, ($I(X;Y) = -\tfrac12\log(1-r^2))$ is a strictly increasing function of ($|r|$). Under elliptical/normal settings, Spearman’s (\rho) is a monotone transform of (r). Consequently:
 
 * Ranking by (I) aligns with ranking by (|r|) (or (r^2)), not necessarily by signed (r) when both signs are present.
 * (\rho) tracks (r) closely when assumptions are met.
